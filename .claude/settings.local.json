@@ -1,0 +1,18 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(mkdir:*)",
+      "Bash(python:*)",
+      "Bash(find:*)",
+      "Bash(pip --version)",
+      "Bash(pip install:*)",
+      "Bash(apt list:*)",
+      "Bash(export PATH=\"$PATH:/root/.local/bin\")",
+      "Bash(ls:*)",
+      "Bash(grep:*)",
+      "Bash(rg:*)",
+      "Bash(head:*)"
+    ],
+    "deny": []
+  }
+}
