@@ -6,9 +6,25 @@
   <component name="ChangeListManager">
     <list default="true" id="4e1b371e-9811-43ff-a439-45331cf6370a" name="Changes" comment="version 1.0.0 of TDA analyser">
       <change beforePath="$PROJECT_DIR$/.idea/workspace.xml" beforeDir="false" afterPath="$PROJECT_DIR$/.idea/workspace.xml" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tda_analysis_system/modules/data_processor.py" beforeDir="false" afterPath="$PROJECT_DIR$/tda_analysis_system/modules/data_processor.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/calibration_module_final.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/master_tda_system_final.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/plotting_module_final.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/processing_module_final.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tda-diffusion-analysis-prompt.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tda-surface-area-prompt.md" beforeDir="false" />
+      <change beforePath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/07-06-25 SS316L_sample(30)_RT_18hours 2025-06-07 15-33-43_processed.csv" beforeDir="false" afterPath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/07-06-25 SS316L_sample(30)_RT_18hours 2025-06-07 15-33-43_processed.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/08-06-25 SS316L_sample(30)_300C_18hours 2025-06-08 13-37-43_processed.csv" beforeDir="false" afterPath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/08-06-25 SS316L_sample(30)_300C_18hours 2025-06-08 13-37-43_processed.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/19-05-25 SS316L_sample(32)_300C_18hours 2025-05-20 15-20-13_processed.csv" beforeDir="false" afterPath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/19-05-25 SS316L_sample(32)_300C_18hours 2025-05-20 15-20-13_processed.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/19-05-25 SS316L_sample(32)_900C_24hours 2025-05-21 18-11-23_processed.csv" beforeDir="false" afterPath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/19-05-25 SS316L_sample(32)_900C_24hours 2025-05-21 18-11-23_processed.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/19-05-25 SS316L_sample(32)_RT_18hours 2025-05-19 13-32-10_processed.csv" beforeDir="false" afterPath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/19-05-25 SS316L_sample(32)_RT_18hours 2025-05-19 13-32-10_processed.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/22-04-25 SS316L_sample(26)_RT_18hours 2025-04-22 17-30-08_processed.csv" beforeDir="false" afterPath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/22-04-25 SS316L_sample(26)_RT_18hours 2025-04-22 17-30-08_processed.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/23-04-25 SS316L_sample(26)_300C_18hours 2025-04-23 17-58-45_processed.csv" beforeDir="false" afterPath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/23-04-25 SS316L_sample(26)_300C_18hours 2025-04-23 17-58-45_processed.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/24-04-25 SS316L_sample(26)_900C_24hours 2025-04-24 16-31-59_processed.csv" beforeDir="false" afterPath="$PROJECT_DIR$/tda_analysis_system/data/processed_experiments/24-04-25 SS316L_sample(26)_900C_24hours 2025-04-24 16-31-59_processed.csv" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tda_analysis_system/modules/calcs.py" beforeDir="false" afterPath="$PROJECT_DIR$/tda_analysis_system/modules/calcs.py" afterDir="false" />
       <change beforePath="$PROJECT_DIR$/tda_analysis_system/modules/plot_manager.py" beforeDir="false" afterPath="$PROJECT_DIR$/tda_analysis_system/modules/plot_manager.py" afterDir="false" />
-      <change beforePath="$PROJECT_DIR$/tda_analysis_system/ui/processing_widget.py" beforeDir="false" afterPath="$PROJECT_DIR$/tda_analysis_system/ui/processing_widget.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tda_analysis_system/ui/diffusion_widget.py" beforeDir="false" afterPath="$PROJECT_DIR$/tda_analysis_system/ui/diffusion_widget.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/tda_analysis_system/ui/plotting_widget.py" beforeDir="false" afterPath="$PROJECT_DIR$/tda_analysis_system/ui/plotting_widget.py" afterDir="false" />
+      <change beforePath="$PROJECT_DIR$/todo_list.md" beforeDir="false" />
     </list>
     <option name="SHOW_DIALOG" value="false" />
     <option name="HIGHLIGHT_CONFLICTS" value="true" />
@@ -38,25 +54,25 @@
     <option name="hideEmptyMiddlePackages" value="true" />
     <option name="showLibraryContents" value="true" />
   </component>
-  <component name="PropertiesComponent"><![CDATA[{
-  "keyToString": {
-    "ASKED_SHARE_PROJECT_CONFIGURATION_FILES": "true",
-    "ModuleVcsDetector.initialDetectionPerformed": "true",
-    "RunOnceActivity.ShowReadmeOnStart": "true",
-    "RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager": "true",
-    "RunOnceActivity.git.unshallow": "true",
-    "SHARE_PROJECT_CONFIGURATION_FILES": "true",
-    "git-widget-placeholder": "main",
-    "ignore.virus.scanning.warn.message": "true",
-    "last_opened_file_path": "E:/Programs/PyCharm 2025.1.3/Projects/TDA analysis tool",
-    "node.js.detected.package.eslint": "true",
-    "node.js.detected.package.tslint": "true",
-    "node.js.selected.package.eslint": "(autodetect)",
-    "node.js.selected.package.tslint": "(autodetect)",
-    "nodejs_package_manager_path": "npm",
-    "vue.rearranger.settings.migration": "true"
+  <component name="PropertiesComponent">{
+  &quot;keyToString&quot;: {
+    &quot;ASKED_SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
+    &quot;ModuleVcsDetector.initialDetectionPerformed&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.ShowReadmeOnStart&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.TerminalTabsStorage.copyFrom.TerminalArrangementManager&quot;: &quot;true&quot;,
+    &quot;RunOnceActivity.git.unshallow&quot;: &quot;true&quot;,
+    &quot;SHARE_PROJECT_CONFIGURATION_FILES&quot;: &quot;true&quot;,
+    &quot;git-widget-placeholder&quot;: &quot;main&quot;,
+    &quot;ignore.virus.scanning.warn.message&quot;: &quot;true&quot;,
+    &quot;last_opened_file_path&quot;: &quot;E:/Programs/PyCharm 2025.1.3/Projects/TDA analysis tool&quot;,
+    &quot;node.js.detected.package.eslint&quot;: &quot;true&quot;,
+    &quot;node.js.detected.package.tslint&quot;: &quot;true&quot;,
+    &quot;node.js.selected.package.eslint&quot;: &quot;(autodetect)&quot;,
+    &quot;node.js.selected.package.tslint&quot;: &quot;(autodetect)&quot;,
+    &quot;nodejs_package_manager_path&quot;: &quot;npm&quot;,
+    &quot;vue.rearranger.settings.migration&quot;: &quot;true&quot;
   }
-}]]></component>
+}</component>
   <component name="RecentsManager">
     <key name="CopyFile.RECENT_KEYS">
       <recent name="E:\Programs\PyCharm 2025.1.3\Projects\TDA analysis tool" />
@@ -89,7 +105,7 @@
       <workItem from="1752023534576" duration="1075000" />
       <workItem from="1752030220744" duration="691000" />
       <workItem from="1752269402620" duration="50000" />
-      <workItem from="1752399048480" duration="1325000" />
+      <workItem from="1752399048480" duration="13052000" />
     </task>
     <task id="LOCAL-00001" summary="version 1.0.0 of TDA analyser">
       <option name="closed" value="true" />

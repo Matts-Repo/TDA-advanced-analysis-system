@@ -17,7 +17,7 @@ import json
 from dataclasses import dataclass, field
 
 from .error_handling import TDAFileError, TDAError
-from .calcs import DiffusionAnalysisEngine, DiffusionAnalysisResult
+from .calcs import DiffusionAnalysisEngine, DiffusionAnalysisResult, DataFilteringUtils
 
 
 @dataclass
@@ -113,6 +113,12 @@ class DatasetStyle:
 @dataclass
 class FilterOptions:
     """Data filtering and processing options"""
+    # Zero and noise filtering
+    exclude_zeros: bool = False
+    keep_origin: bool = True            # Keep (0, 0) point even if excluding zeros
+    threshold_percent: float = 2.0      # Remove values below this % of rolling average
+    detection_limit: float = 0.1        # Minimum detectable value (ppm)
+    
     # Outlier removal
     remove_outliers: bool = False
     outlier_method: str = "zscore"      # "zscore", "iqr", "manual"
@@ -145,6 +151,16 @@ class PlotOptions:
     xlabel: str = "Time (minutes)"
     ylabel: str = ""
     title: str = ""
+    
+    # Dual axis settings
+    dual_axis: bool = False
+    ylabel_right: str = ""              # Right Y-axis label for dual axis mode
+    primary_only: bool = False          # Show only primary data in dual axis mode
+    clean_legend: bool = True           # Don't add unit labels to legend entries
+    single_axis_units: str = "mol"      # "mol" or "ppm" for single axis mode
+    
+    # Diffusion analysis settings
+    use_mol_units: bool = True          # Use mol/cm² units for diffusion analysis
     
     # Axis limits
     xlim_auto: bool = True
@@ -338,6 +354,27 @@ class DataFilter:
         x_array = np.array(x_data)
         y_array = np.array(y_data)
         
+        # Apply zero filtering first (if enabled)
+        if dataset.filter_options.exclude_zeros:
+            # Create DataFrame for filtering
+            temp_df = pd.DataFrame({
+                'Time_min': x_array,
+                'Value': y_array
+            })
+            
+            filtered_df = DataFilteringUtils.filter_zeros(
+                temp_df, 
+                value_column='Value',
+                time_column='Time_min',
+                keep_origin=dataset.filter_options.keep_origin,
+                threshold_percent=dataset.filter_options.threshold_percent,
+                detection_limit=dataset.filter_options.detection_limit
+            )
+            
+            if not filtered_df.empty:
+                x_array = filtered_df['Time_min'].values
+                y_array = filtered_df['Value'].values
+        
         # Apply filters in sequence
         if dataset.filter_options.time_range_filter:
             x_array, y_array = DataFilter.filter_time_range(
@@ -483,17 +520,29 @@ class PlotGenerator:
         self.figure = Figure(figsize=options.figure_size, dpi=options.dpi)
         self.axes = self.figure.add_subplot(111)
         
-        # Set Y-axis label based on plot type and calculation mode
-        # Check if any dataset is surface normalized to determine labeling
+        # Check for dual axis mode
+        if options.dual_axis and plot_type in ["h_ppm_per_min", "cumulative_h_ppm"]:
+            return self._create_dual_axis_plot(datasets, plot_type, options)
+        
+        # Set Y-axis label based on plot type, calculation mode, and unit preference
         has_surface_normalized = any(dataset.calculation_mode == "surface_normalized" for dataset in datasets)
         
+        # Determine units based on user preference for single axis mode
+        if options.single_axis_units == "mol":
+            use_mol_units = True
+        elif options.single_axis_units == "ppm":
+            use_mol_units = False
+        else:
+            # Default behavior - use mol if surface normalized, otherwise ppm
+            use_mol_units = has_surface_normalized
+        
         if plot_type == "h_ppm_per_min":
-            if has_surface_normalized:
+            if use_mol_units:
                 default_ylabel = "Hydrogen Evolution Rate (mol/cm²/min)"
             else:
                 default_ylabel = "Hydrogen Evolution Rate (ppm/min)"
         elif plot_type == "cumulative_h_ppm":
-            if has_surface_normalized:
+            if use_mol_units:
                 default_ylabel = "Cumulative Hydrogen (mol/cm²)"
             else:
                 default_ylabel = "Cumulative Hydrogen Content (ppm)"
@@ -512,6 +561,27 @@ class PlotGenerator:
                     print(f"Warning: No data to plot for dataset {dataset.name}")
                     continue
                 
+                # Convert units if needed for single axis mode
+                if use_mol_units and plot_type in ["h_ppm_per_min", "cumulative_h_ppm"]:
+                    # Convert ppm data to mol units
+                    ppm_array = np.array(y_data)
+                    mol_data = DataFilteringUtils.ppm_to_mol_conversion(
+                        ppm_array,
+                        dataset.sample_weight,
+                        dataset.surface_area if dataset.calculation_mode == "surface_normalized" else None
+                    )
+                    y_data = mol_data.tolist()
+                elif not use_mol_units and plot_type in ["h_ppm_per_min", "cumulative_h_ppm"]:
+                    # If dataset has mol data but we want ppm, convert back
+                    if dataset.calculation_mode == "surface_normalized":
+                        mol_array = np.array(y_data)
+                        ppm_data = DataFilteringUtils.mol_to_ppm_conversion(
+                            mol_array,
+                            dataset.sample_weight,
+                            dataset.surface_area
+                        )
+                        y_data = ppm_data.tolist()
+                
                 # Use dataset style or assign defaults
                 style = dataset.style
                 if not style.color or style.color == '#1f77b4':
@@ -520,14 +590,14 @@ class PlotGenerator:
                 if not style.linestyle:
                     style.linestyle = self.default_linestyles[i % len(self.default_linestyles)]
                 
-                # Plot the data
+                # Plot the data with consistent styling
                 line = self.axes.plot(
                     x_data, y_data,
                     color=style.color,
                     linestyle=style.linestyle,
                     linewidth=style.linewidth,
                     marker=style.marker if style.marker != 'None' else None,
-                    markersize=style.markersize,
+                    markersize=max(style.markersize * 0.8, 3),  # Slightly smaller markers
                     alpha=style.alpha,
                     label=dataset.get_display_label(),
                     zorder=style.zorder
@@ -542,6 +612,139 @@ class PlotGenerator:
         
         # Apply formatting
         self._apply_plot_formatting(options, default_ylabel)
+        
+        return self.figure
+    
+    def _create_dual_axis_plot(self, datasets: List[PlotDataset], 
+                              plot_type: str, options: PlotOptions) -> Figure:
+        """Create dual axis plot with mol units on left and ppm units on right"""
+        
+        # Create figure and main axis
+        self.figure = Figure(figsize=options.figure_size, dpi=options.dpi)
+        self.axes = self.figure.add_subplot(111)
+        
+        # Create secondary axis
+        ax_right = self.axes.twinx()
+        
+        # Set labels for dual axis
+        if plot_type == "h_ppm_per_min":
+            left_label = "H₂ Evolution Rate (mol/cm²/min)"
+            right_label = "H₂ Evolution Rate (ppm/min)"
+        elif plot_type == "cumulative_h_ppm":
+            left_label = "Cumulative H₂ (mol/cm²)"
+            right_label = "Cumulative H₂ (ppm)"
+        
+        # Plot each dataset on both axes
+        for i, dataset in enumerate(datasets):
+            try:
+                # Apply filters and get plot data
+                x_data, y_data = DataFilter.apply_all_filters(dataset, plot_type)
+                
+                if not x_data or not y_data:
+                    print(f"Warning: No data to plot for dataset {dataset.name}")
+                    continue
+                
+                # Convert ppm data to mol data for left axis
+                if plot_type == "h_ppm_per_min":
+                    ppm_data = dataset.h_ppm_per_min if len(dataset.h_ppm_per_min) > 0 else y_data
+                elif plot_type == "cumulative_h_ppm":
+                    ppm_data = dataset.cumulative_h_ppm if len(dataset.cumulative_h_ppm) > 0 else y_data
+                
+                # Apply same filtering to ppm data
+                x_array = np.array(x_data)
+                ppm_array = np.array(ppm_data[:len(x_array)])
+                
+                # Convert to mol units for left axis
+                mol_data = DataFilteringUtils.ppm_to_mol_conversion(
+                    ppm_array, 
+                    dataset.sample_weight,
+                    dataset.surface_area if dataset.calculation_mode == "surface_normalized" else None
+                )
+                
+                # Use dataset style or assign defaults
+                style = dataset.style
+                if not style.color or style.color == '#1f77b4':
+                    style.color = self.default_colors[i % len(self.default_colors)]
+                
+                # Determine legend labels based on options
+                if options.clean_legend:
+                    mol_label = dataset.get_display_label()
+                    ppm_label = f"{dataset.get_display_label()} (ppm ref)"
+                else:
+                    mol_label = f"{dataset.get_display_label()} (mol)"
+                    ppm_label = f"{dataset.get_display_label()} (ppm)"
+                
+                # Plot on left axis (mol units)
+                line_left = self.axes.plot(
+                    x_data, mol_data[:len(x_data)],
+                    color=style.color,
+                    linestyle=style.linestyle,
+                    linewidth=style.linewidth,
+                    alpha=style.alpha,
+                    label=mol_label,
+                    zorder=style.zorder
+                )[0]
+                
+                # Plot on right axis (ppm units) - only if not primary_only mode
+                if not options.primary_only:
+                    line_right = ax_right.plot(
+                        x_data, y_data,
+                        color=style.color,
+                        linestyle='--',  # Always dashed for reference
+                        linewidth=style.linewidth * 0.7,
+                        alpha=style.alpha * 0.5,
+                        label=ppm_label,
+                        zorder=style.zorder - 0.1
+                    )[0]
+                
+            except Exception as e:
+                print(f"Warning: Failed to plot dataset {dataset.name}: {e}")
+                continue
+        
+        # Apply formatting to both axes
+        self.axes.set_xlabel(options.xlabel, fontsize=12)
+        self.axes.set_ylabel(left_label, fontsize=12, color='black')
+        
+        # Only show right axis label if we're plotting secondary data
+        if not options.primary_only:
+            ax_right.set_ylabel(right_label, fontsize=12, color='gray')
+        else:
+            ax_right.set_ylabel("")  # Hide right axis label
+            ax_right.tick_params(right=False, labelright=False)  # Hide right ticks
+        
+        if options.title:
+            self.axes.set_title(options.title, fontsize=14, fontweight='bold')
+        
+        # Grid and styling
+        if options.show_grid:
+            self.axes.grid(True, alpha=options.grid_alpha, linestyle='-', linewidth=0.5)
+        
+        # Combined legend
+        if options.show_legend:
+            lines1, labels1 = self.axes.get_legend_handles_labels()
+            
+            if options.primary_only:
+                # Only show primary axis legend
+                self.axes.legend(lines1, labels1, 
+                               loc=options.legend_location, fontsize=options.legend_fontsize)
+            else:
+                # Show combined legend
+                lines2, labels2 = ax_right.get_legend_handles_labels()
+                self.axes.legend(lines1 + lines2, labels1 + labels2, 
+                               loc=options.legend_location, fontsize=options.legend_fontsize)
+        
+        # Professional styling
+        if options.despine:
+            self.axes.spines['top'].set_visible(False)
+            ax_right.spines['top'].set_visible(False)
+        
+        # Improve tick appearance
+        self.axes.tick_params(direction='out', length=4, width=1)
+        ax_right.tick_params(direction='out', length=4, width=1)
+        
+        # Tight layout
+        if options.tight_layout:
+            self.figure.tight_layout()
         
         return self.figure
     
@@ -600,6 +803,9 @@ class PlotGenerator:
                              show_linear_fit: bool = True,
                              calculate_D: bool = True,
                              sample_thickness: float = 0.1,
+                             temperature: float = 25.0,
+                             filter_noise: bool = False,
+                             detection_limit: float = 0.1,
                              options: PlotOptions = None) -> Tuple[Figure, DiffusionAnalysisResult]:
         """
         Generate diffusion analysis plot with linear regression
@@ -623,39 +829,157 @@ class PlotGenerator:
             # Initialize diffusion analysis engine
             diffusion_engine = DiffusionAnalysisEngine()
             
+            # Determine if we should use mol units
+            use_mol_units = getattr(options, 'use_mol_units', True)
+            
+            # Prepare data for analysis
+            time_data = dataset.time_minutes
+            desorption_rate = dataset.h_ppm_per_min if dataset.calculation_mode == "mass_normalized" else dataset.h_mol_cm2_per_min
+            cumulative_hydrogen = dataset.cumulative_h_ppm if dataset.calculation_mode == "mass_normalized" else dataset.cumulative_h_mol_cm2
+            
+            # Apply noise filtering if requested (only for tail region analysis)
+            if filter_noise:
+                print(f"Applying noise filtering with detection limit: {detection_limit:.6f} ppm")
+                
+                # Create DataFrame for filtering (only use data after tail start)
+                tail_mask = np.array(time_data) >= tail_start_time
+                tail_time = np.array(time_data)[tail_mask]
+                tail_rate = np.array(desorption_rate)[tail_mask]
+                
+                print(f"Tail region: {len(tail_time)} points from {tail_start_time:.1f} min onwards")
+                print(f"Tail rate range: {np.min(tail_rate):.8f} to {np.max(tail_rate):.8f} ppm/min")
+                
+                if len(tail_time) > 0:
+                    # Create DataFrame with quality flags if available from original dataset
+                    temp_df = pd.DataFrame({
+                        'Time_min': tail_time,
+                        'H_ppm_per_min': tail_rate
+                    })
+                    
+                    # Try to add quality flags if they exist in the original dataset
+                    if hasattr(dataset, 'quality_flags') and len(dataset.quality_flags) > 0:
+                        # Map quality flags to tail region
+                        original_time = np.array(dataset.time_minutes)
+                        original_flags = np.array(dataset.quality_flags)
+                        
+                        # Find quality flags for tail region
+                        tail_flags = []
+                        for t in tail_time:
+                            # Find closest time match in original data
+                            closest_idx = np.argmin(np.abs(original_time - t))
+                            if closest_idx < len(original_flags):
+                                tail_flags.append(original_flags[closest_idx])
+                            else:
+                                tail_flags.append('')
+                        
+                        temp_df['Quality_Flags'] = tail_flags
+                        print(f"Added quality flags: {len([f for f in tail_flags if 'low_signal' in str(f)])} low_signal flags found")
+                    
+                    filtered_df = DataFilteringUtils.filter_zeros(
+                        temp_df,
+                        value_column='H_ppm_per_min',
+                        time_column='Time_min',
+                        keep_origin=False,  # Don't keep origin for tail region
+                        threshold_percent=2.0,
+                        detection_limit=detection_limit
+                    )
+                    
+                    if not filtered_df.empty and len(filtered_df) < len(temp_df):
+                        # Replace tail region data with filtered data
+                        filtered_time = filtered_df['Time_min'].tolist()
+                        filtered_rate = filtered_df['H_ppm_per_min'].tolist()
+                        
+                        print(f"Filtering reduced tail region from {len(tail_time)} to {len(filtered_time)} points")
+                        
+                        # Combine pre-tail and filtered tail data
+                        pre_tail_mask = np.array(time_data) < tail_start_time
+                        pre_tail_time = np.array(time_data)[pre_tail_mask].tolist()
+                        pre_tail_rate = np.array(desorption_rate)[pre_tail_mask].tolist()
+                        
+                        time_data = pre_tail_time + filtered_time
+                        desorption_rate = pre_tail_rate + filtered_rate
+                        
+                        print(f"Final dataset: {len(time_data)} points total")
+                    else:
+                        print(f"No filtering applied - would have removed too many points or no noise detected")
+            
+            # Convert data to mol units if requested
+            if use_mol_units:
+                # Convert desorption rate and cumulative hydrogen to mol units
+                desorption_rate_mol = DataFilteringUtils.ppm_to_mol_conversion(
+                    np.array(desorption_rate),
+                    dataset.sample_weight,
+                    dataset.surface_area if dataset.surface_area > 0 else 1.0  # Default surface area if not available
+                )
+                cumulative_hydrogen_mol = DataFilteringUtils.ppm_to_mol_conversion(
+                    np.array(cumulative_hydrogen),
+                    dataset.sample_weight,
+                    dataset.surface_area if dataset.surface_area > 0 else 1.0
+                )
+                
+                # Use mol data for analysis
+                analysis_desorption_rate = desorption_rate_mol.tolist()
+                analysis_cumulative_hydrogen = cumulative_hydrogen_mol.tolist()
+            else:
+                # Use original ppm data
+                analysis_desorption_rate = desorption_rate
+                analysis_cumulative_hydrogen = cumulative_hydrogen
+            
             # Perform diffusion analysis
             analysis_result = diffusion_engine.analyze_diffusion_behavior(
-                time_minutes=dataset.time_minutes,
-                desorption_rate=dataset.h_ppm_per_min if dataset.calculation_mode == "mass_normalized" else dataset.h_mol_cm2_per_min,
-                cumulative_hydrogen=dataset.cumulative_h_ppm if dataset.calculation_mode == "mass_normalized" else dataset.cumulative_h_mol_cm2,
+                time_minutes=time_data,
+                desorption_rate=analysis_desorption_rate,
+                cumulative_hydrogen=analysis_cumulative_hydrogen,
                 analysis_type=plot_type,
                 tail_start=tail_start_time,
                 sample_thickness=sample_thickness,
                 calculate_D=calculate_D
             )
             
+            # Store unit information in the analysis result
+            analysis_result.units_used = "mol/cm²" if use_mol_units else "ppm"
+            analysis_result.surface_area = dataset.surface_area if dataset.surface_area > 0 else 1.0
+            analysis_result.sample_weight = dataset.sample_weight
+            
+            # Apply temperature correction if D was calculated and temperature != 25°C
+            if (calculate_D and analysis_result.diffusion_coefficient > 0 and 
+                abs(temperature - 25.0) > 0.1):
+                
+                from .calcs import TemperatureCorrectionUtils
+                temp_utils = TemperatureCorrectionUtils()
+                
+                # Get literature value for comparison at this temperature
+                lit_data = temp_utils.get_literature_D_at_temperature("steel", temperature)
+                
+                # Store original and temperature-corrected D
+                analysis_result.original_diffusion_coefficient = analysis_result.diffusion_coefficient
+                analysis_result.measurement_temperature = temperature
+                analysis_result.literature_D_at_temp = lit_data["D_literature"]
+                analysis_result.activation_energy = lit_data["activation_energy"]
+            
             # Create figure and axes
             self.figure = Figure(figsize=options.figure_size, dpi=options.dpi)
             self.axes = self.figure.add_subplot(111)
             
-            # Set labels based on plot type
+            # Set labels based on plot type and unit preference
+            
             if plot_type == "1_sqrt_t":
-                xlabel = "1/√t (s⁻⁰·⁵)"
-                if dataset.calculation_mode == "surface_normalized":
+                xlabel = "1/√t (min⁻⁰·⁵)"
+                if use_mol_units:
                     ylabel = "Hydrogen Evolution Rate (mol/cm²/min)"
                 else:
                     ylabel = "Hydrogen Evolution Rate (ppm/min)"
                 title = "Desorption Rate vs 1/√t - Diffusion Analysis"
             elif plot_type == "sqrt_t":
-                xlabel = "√t (s⁰·⁵)"
-                if dataset.calculation_mode == "surface_normalized":
+                xlabel = "√t (min⁰·⁵)"
+                if use_mol_units:
                     ylabel = "Cumulative Hydrogen (mol/cm²)"
                 else:
                     ylabel = "Cumulative Hydrogen (ppm)"
                 title = "Cumulative Hydrogen vs √t - Diffusion Analysis"
             elif plot_type == "log_log":
                 xlabel = "log(Time) (min)"
-                if dataset.calculation_mode == "surface_normalized":
+                if use_mol_units:
                     ylabel = "log(Evolution Rate) (mol/cm²/min)"
                 else:
                     ylabel = "log(Evolution Rate) (ppm/min)"
@@ -665,13 +989,15 @@ class PlotGenerator:
                 ylabel = "Y"
                 title = "Diffusion Analysis"
             
-            # Plot the data points
+            # Plot the data points with smaller, cleaner markers
             self.axes.scatter(
                 analysis_result.x_data, 
                 analysis_result.y_data,
-                alpha=0.7,
-                s=30,
+                alpha=0.8,
+                s=20,  # Smaller markers
                 color='#1f77b4',
+                edgecolors='white',
+                linewidth=0.5,
                 label=f'{dataset.get_display_label()} (tail region)',
                 zorder=2
             )
@@ -684,51 +1010,73 @@ class PlotGenerator:
                     color='red',
                     linestyle='--',
                     linewidth=2,
+                    alpha=0.7,
                     label=f'Linear fit (R² = {analysis_result.r_squared:.3f})',
                     zorder=3
                 )
                 
-                # Add equation text
-                equation_text = f'y = {analysis_result.slope:.2e}x + {analysis_result.intercept:.2e}'
-                self.axes.text(
-                    0.05, 0.95,
-                    equation_text,
-                    transform=self.axes.transAxes,
-                    fontsize=10,
-                    verticalalignment='top',
-                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8)
-                )
-                
-                # Add R² text
-                r2_text = f'R² = {analysis_result.r_squared:.4f}\nFit quality: {analysis_result.goodness_of_fit}'
-                self.axes.text(
-                    0.05, 0.85,
-                    r2_text,
-                    transform=self.axes.transAxes,
-                    fontsize=10,
-                    verticalalignment='top',
-                    bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8)
-                )
-                
-                # Add diffusion coefficient if calculated
-                if calculate_D and plot_type == "1_sqrt_t" and analysis_result.diffusion_coefficient > 0:
-                    d_text = f'D = {analysis_result.diffusion_coefficient:.2e} cm²/s'
+                # Single clean text box with essential information
+                if analysis_result.r_squared >= 0.8:  # Only show fit info if R² is decent
+                    # Create concise information text
+                    info_lines = [
+                        f'R² = {analysis_result.r_squared:.3f}',
+                        f'Slope = {analysis_result.slope:.2e}'
+                    ]
+                    
+                    info_text = '\n'.join(info_lines)
+                    
+                    # Position text box in the clearest corner
+                    # Check if data is mainly in upper left or lower right
+                    x_data = np.array(analysis_result.x_data)
+                    y_data = np.array(analysis_result.y_data)
+                    
+                    if len(x_data) > 0 and len(y_data) > 0:
+                        x_mid = (np.max(x_data) + np.min(x_data)) / 2
+                        y_mid = (np.max(y_data) + np.min(y_data)) / 2
+                        
+                        # Simple heuristic: place box opposite to data concentration
+                        x_center = (np.max(x_data) - np.min(x_data)) / 2 + np.min(x_data)
+                        y_center = (np.max(y_data) - np.min(y_data)) / 2 + np.min(y_data)
+                        
+                        # Count points in each quadrant to find best position
+                        upper_right_count = np.sum((x_data > x_center) & (y_data > y_center))
+                        lower_left_count = np.sum((x_data < x_center) & (y_data < y_center))
+                        
+                        if upper_right_count > lower_left_count:
+                            # Place in lower left
+                            text_x, text_y = 0.05, 0.25
+                        else:
+                            # Place in upper right
+                            text_x, text_y = 0.65, 0.85
+                    else:
+                        # Default position
+                        text_x, text_y = 0.05, 0.85
+                    
                     self.axes.text(
-                        0.05, 0.75,
-                        d_text,
+                        text_x, text_y,
+                        info_text,
                         transform=self.axes.transAxes,
                         fontsize=10,
                         verticalalignment='top',
-                        bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8)
+                        bbox=dict(boxstyle='round,pad=0.3', facecolor='white', 
+                                alpha=0.8, edgecolor='gray', linewidth=0.5)
                     )
             
             # Set labels and title
-            self.axes.set_xlabel(options.xlabel or xlabel, fontsize=12)
-            self.axes.set_ylabel(options.ylabel or ylabel, fontsize=12)
-            self.axes.set_title(options.title or title, fontsize=14, fontweight='bold')
+            # Use custom labels if provided, otherwise use plot-type specific labels
+            final_xlabel = options.xlabel if options.xlabel else xlabel
+            final_ylabel = options.ylabel if options.ylabel else ylabel
+            final_title = options.title if options.title else title
             
-            # Apply formatting
+            self.axes.set_xlabel(final_xlabel, fontsize=12)
+            self.axes.set_ylabel(final_ylabel, fontsize=12)
+            self.axes.set_title(final_title, fontsize=14, fontweight='bold')
+            
+            # Apply formatting with improved aesthetics
             self._apply_plot_formatting(options, ylabel)
+            
+            # Use tight_layout to prevent label cutoff
+            self.figure.tight_layout()
             
             return self.figure, analysis_result
             
@@ -837,6 +1185,9 @@ class PlotManager:
                                show_linear_fit: bool = True,
                                calculate_D: bool = True,
                                sample_thickness: float = 0.1,
+                               temperature: float = 25.0,
+                               filter_noise: bool = False,
+                               detection_limit: float = 0.1,
                                options: PlotOptions = None) -> Tuple[Figure, DiffusionAnalysisResult]:
         """Create diffusion analysis plot with specified options"""
         try:
@@ -848,6 +1199,9 @@ class PlotManager:
                 show_linear_fit=show_linear_fit,
                 calculate_D=calculate_D,
                 sample_thickness=sample_thickness,
+                temperature=temperature,
+                filter_noise=filter_noise,
+                detection_limit=detection_limit,
                 options=options
             )
             return figure, analysis_result

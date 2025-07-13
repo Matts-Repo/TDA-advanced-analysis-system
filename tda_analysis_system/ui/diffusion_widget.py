@@ -178,6 +178,67 @@ class DiffusionWidget(QWidget):
         self.show_fit_check.stateChanged.connect(self.update_analysis)
         layout.addWidget(self.show_fit_check)
         
+        # Unit selection for diffusion analysis
+        units_layout = QVBoxLayout()
+        units_layout.addWidget(QLabel("Y-axis Units:"))
+        
+        units_radio_layout = QHBoxLayout()
+        self.units_mol_radio = QRadioButton("mol/cm²")
+        self.units_mol_radio.setChecked(True)
+        self.units_mol_radio.toggled.connect(self.update_analysis)
+        units_radio_layout.addWidget(self.units_mol_radio)
+        
+        self.units_ppm_radio = QRadioButton("ppm")
+        self.units_ppm_radio.toggled.connect(self.update_analysis)
+        units_radio_layout.addWidget(self.units_ppm_radio)
+        
+        units_layout.addLayout(units_radio_layout)
+        
+        # Note about surface area
+        note_label = QLabel("Note: mol/cm² requires surface area data")
+        note_label.setStyleSheet("QLabel { font-size: 9px; color: #666; }")
+        note_label.setWordWrap(True)
+        units_layout.addWidget(note_label)
+        
+        layout.addLayout(units_layout)
+        
+        # Manual label controls
+        labels_layout = QVBoxLayout()
+        labels_layout.addWidget(QLabel("Custom Labels (optional):"))
+        
+        xlabel_layout = QHBoxLayout()
+        xlabel_layout.addWidget(QLabel("X-axis:"))
+        self.custom_xlabel_edit = QLineEdit()
+        self.custom_xlabel_edit.setPlaceholderText("Auto (1/√t, √t, etc.)")
+        self.custom_xlabel_edit.textChanged.connect(self.update_analysis)
+        xlabel_layout.addWidget(self.custom_xlabel_edit)
+        
+        # Auto-fill button
+        auto_fill_btn = QPushButton("Auto-fill")
+        auto_fill_btn.setMaximumWidth(80)
+        auto_fill_btn.clicked.connect(self.auto_fill_labels)
+        xlabel_layout.addWidget(auto_fill_btn)
+        
+        labels_layout.addLayout(xlabel_layout)
+        
+        ylabel_layout = QHBoxLayout()
+        ylabel_layout.addWidget(QLabel("Y-axis:"))
+        self.custom_ylabel_edit = QLineEdit()
+        self.custom_ylabel_edit.setPlaceholderText("Auto")
+        self.custom_ylabel_edit.textChanged.connect(self.update_analysis)
+        ylabel_layout.addWidget(self.custom_ylabel_edit)
+        labels_layout.addLayout(ylabel_layout)
+        
+        title_layout = QHBoxLayout()
+        title_layout.addWidget(QLabel("Title:"))
+        self.custom_title_edit = QLineEdit()
+        self.custom_title_edit.setPlaceholderText("Auto")
+        self.custom_title_edit.textChanged.connect(self.update_analysis)
+        title_layout.addWidget(self.custom_title_edit)
+        labels_layout.addLayout(title_layout)
+        
+        layout.addLayout(labels_layout)
+        
         group.setLayout(layout)
         return group
     
@@ -185,6 +246,48 @@ class DiffusionWidget(QWidget):
         """Analysis calculation settings"""
         group = QGroupBox("Analysis Settings")
         layout = QVBoxLayout()
+        
+        # Temperature inputs
+        temp_layout = QHBoxLayout()
+        temp_layout.addWidget(QLabel("Test Temperature:"))
+        self.temperature_spin = QDoubleSpinBox()
+        self.temperature_spin.setRange(0, 1200)
+        self.temperature_spin.setValue(25)
+        self.temperature_spin.setSuffix(" °C")
+        self.temperature_spin.valueChanged.connect(self.update_analysis)
+        temp_layout.addWidget(self.temperature_spin)
+        layout.addLayout(temp_layout)
+        
+        # Optional D override
+        d_override_layout = QHBoxLayout()
+        d_override_layout.addWidget(QLabel("Known D (optional):"))
+        self.d_override_spin = QDoubleSpinBox()
+        self.d_override_spin.setRange(0, 1e-2)
+        self.d_override_spin.setDecimals(10)
+        self.d_override_spin.setValue(0.0)
+        self.d_override_spin.setSuffix(" cm²/s")
+        self.d_override_spin.setSpecialValueText("Auto-calculate")
+        self.d_override_spin.valueChanged.connect(self.update_analysis)
+        d_override_layout.addWidget(self.d_override_spin)
+        layout.addLayout(d_override_layout)
+        
+        # GC detection limit
+        gc_limit_layout = QHBoxLayout()
+        gc_limit_layout.addWidget(QLabel("GC Detection Limit:"))
+        self.gc_limit_spin = QDoubleSpinBox()
+        self.gc_limit_spin.setRange(0.000001, 10.0)
+        self.gc_limit_spin.setValue(0.001)  # Lower default for typical TDA data
+        self.gc_limit_spin.setDecimals(6)
+        self.gc_limit_spin.setSuffix(" ppm")
+        self.gc_limit_spin.setSpecialValueText("Auto-adjust")
+        self.gc_limit_spin.valueChanged.connect(self.update_analysis)
+        gc_limit_layout.addWidget(self.gc_limit_spin)
+        layout.addLayout(gc_limit_layout)
+        
+        # Filter noise/zeros checkbox
+        self.filter_noise_check = QCheckBox("Filter noise/zeros")
+        self.filter_noise_check.stateChanged.connect(self.update_analysis)
+        layout.addWidget(self.filter_noise_check)
         
         # Calculate diffusion coefficient
         self.calc_d_check = QCheckBox("Calculate diffusion coefficient")
@@ -363,6 +466,43 @@ Data Points: {len(dataset.time_minutes)}"""
         else:
             return "1_sqrt_t"
     
+    def auto_fill_labels(self):
+        """Auto-fill the custom label fields with appropriate defaults"""
+        plot_type = self.get_selected_plot_type()
+        use_mol_units = self.units_mol_radio.isChecked()
+        
+        # Determine default labels based on plot type and units
+        if plot_type == "1_sqrt_t":
+            xlabel = "1/√t (min⁻⁰·⁵)"
+            if use_mol_units:
+                ylabel = "Hydrogen Evolution Rate (mol/cm²/min)"
+            else:
+                ylabel = "Hydrogen Evolution Rate (ppm/min)"
+            title = "Desorption Rate vs 1/√t - Diffusion Analysis"
+        elif plot_type == "sqrt_t":
+            xlabel = "√t (min⁰·⁵)"
+            if use_mol_units:
+                ylabel = "Cumulative Hydrogen (mol/cm²)"
+            else:
+                ylabel = "Cumulative Hydrogen (ppm)"
+            title = "Cumulative Hydrogen vs √t - Diffusion Analysis"
+        elif plot_type == "log_log":
+            xlabel = "log(Time) (min)"
+            if use_mol_units:
+                ylabel = "log(Evolution Rate) (mol/cm²/min)"
+            else:
+                ylabel = "log(Evolution Rate) (ppm/min)"
+            title = "Log-Log Plot - Diffusion Analysis"
+        else:
+            xlabel = "Time"
+            ylabel = "Value"
+            title = "Diffusion Analysis"
+        
+        # Fill the fields
+        self.custom_xlabel_edit.setText(xlabel)
+        self.custom_ylabel_edit.setText(ylabel)
+        self.custom_title_edit.setText(title)
+    
     def update_analysis(self):
         """Update the diffusion analysis plot and results"""
         if not self.loaded_datasets:
@@ -386,6 +526,20 @@ Data Points: {len(dataset.time_minutes)}"""
             options.show_legend = True
             options.show_grid = True
             
+            # Set custom labels if provided
+            options.xlabel = self.custom_xlabel_edit.text().strip()
+            options.ylabel = self.custom_ylabel_edit.text().strip()
+            options.title = self.custom_title_edit.text().strip()
+            
+            # Get analysis settings
+            temperature = self.temperature_spin.value()
+            filter_noise = self.filter_noise_check.isChecked()
+            detection_limit = self.gc_limit_spin.value()
+            use_mol_units = self.units_mol_radio.isChecked()
+            
+            # Add unit preference to options
+            options.use_mol_units = use_mol_units
+            
             # Generate diffusion plot
             self.current_figure, self.current_analysis_result = self.plot_manager.generate_diffusion_plot(
                 dataset=dataset,
@@ -394,6 +548,9 @@ Data Points: {len(dataset.time_minutes)}"""
                 show_linear_fit=show_fit,
                 calculate_D=calc_d,
                 sample_thickness=thickness,
+                temperature=temperature,
+                filter_noise=filter_noise,
+                detection_limit=detection_limit,
                 options=options
             )
             
@@ -417,16 +574,42 @@ Data Points: {len(dataset.time_minutes)}"""
         
         result = self.current_analysis_result
         
+        # Add filtering information if available
+        filtering_info = ""
+        if self.filter_noise_check.isChecked():
+            detection_limit = self.gc_limit_spin.value()
+            filtering_info = f"""
+Noise Filtering Applied:
+  Detection Limit: {detection_limit:.6f} ppm
+  (Check console for detailed filtering results)
+"""
+
+        # Determine slope units based on analysis
+        units_used = getattr(result, 'units_used', 'ppm')
+        if result.analysis_type == "1_sqrt_t":
+            if units_used == "mol/cm²":
+                slope_units = "mol/(cm²·min⁻⁰·⁵)"
+            else:
+                slope_units = "ppm·min⁻⁰·⁵"
+        elif result.analysis_type == "sqrt_t":
+            if units_used == "mol/cm²":
+                slope_units = "mol/(cm²·min⁰·⁵)"
+            else:
+                slope_units = "ppm/min⁰·⁵"
+        else:
+            slope_units = "log units"
+
         results_text = f"""DIFFUSION ANALYSIS RESULTS
 {'='*40}
-
+{filtering_info}
 Tail Region Analysis:
   Start Time: {result.tail_start_time:.1f} minutes
   Data Points: {result.num_points}
   Analysis Type: {result.analysis_type}
+  Units Used: {units_used}
 
 Linear Regression:
-  Slope: {result.slope:.4e}
+  Slope: {result.slope:.4e} {slope_units}
   Intercept: {result.intercept:.4e}
   R² Value: {result.r_squared:.4f}
   P-value: {result.p_value:.4e}
@@ -439,9 +622,25 @@ Linear Regression:
             results_text += f"""Diffusion Coefficient:
   D = {result.diffusion_coefficient:.4e} cm²/s
   Sample Thickness: {result.thickness:.3f} cm
-  
+"""
+            
+            # Add temperature information if available
+            if hasattr(result, 'measurement_temperature'):
+                results_text += f"  Test Temperature: {result.measurement_temperature:.0f}°C\n"
+                
+                if hasattr(result, 'literature_D_at_temp'):
+                    lit_d = result.literature_D_at_temp
+                    ratio = result.diffusion_coefficient / lit_d
+                    results_text += f"""  
+Literature Comparison at {result.measurement_temperature:.0f}°C:
+  Expected D: {lit_d:.4e} cm²/s
+  Your value: {ratio:.2f}x expected
+  Activation Energy: {result.activation_energy:.1f} kJ/mol
+"""
+            else:
+                results_text += f"""  
 Literature Comparison:
-  Typical for steel: ~1.0e-7 cm²/s at RT
+  Typical for steel: ~1.0e-7 cm²/s at 25°C
   Your value: {result.diffusion_coefficient/1e-7:.2f}x typical
 """
         

@@ -488,6 +488,274 @@ class DiffusionCoefficientCalculator:
             }
 
 
+class DataFilteringUtils:
+    """Utility functions for filtering and cleaning TDA data"""
+    
+    @staticmethod
+    def filter_zeros(df: pd.DataFrame, 
+                    value_column: str,
+                    time_column: str = 'Time_min',
+                    keep_origin: bool = True,
+                    threshold_percent: float = 2.0,
+                    detection_limit: float = 0.1) -> pd.DataFrame:
+        """
+        Filter out zero values and noise from TDA data
+        
+        Args:
+            df: DataFrame with TDA data
+            value_column: Name of column containing values to filter
+            time_column: Name of time column
+            keep_origin: Always keep the (0, 0) point
+            threshold_percent: Remove values below this % of rolling average
+            detection_limit: Minimum detectable value (ppm)
+        
+        Returns:
+            Filtered DataFrame
+        """
+        try:
+            if df.empty or value_column not in df.columns:
+                return df.copy()
+            
+            filtered_df = df.copy()
+            
+            # Create mask for valid data
+            valid_mask = pd.Series(True, index=filtered_df.index)
+            
+            # Remove exact zeros (except origin if keep_origin=True)
+            if keep_origin:
+                # Keep first point if it's at time 0
+                origin_mask = (filtered_df[time_column] == 0) & (filtered_df[value_column] == 0)
+                zero_mask = (filtered_df[value_column] == 0) & ~origin_mask
+            else:
+                zero_mask = filtered_df[value_column] == 0
+            
+            valid_mask &= ~zero_mask
+            
+            # Auto-adjust detection limit if it's too high for the data
+            data_values = filtered_df[value_column].values
+            data_max = np.max(data_values)
+            data_median = np.median(data_values[data_values > 0])
+            
+            # If detection limit is higher than 10% of median value, auto-adjust
+            auto_detection_limit = detection_limit
+            if detection_limit > data_median * 0.1:
+                auto_detection_limit = data_median * 0.01  # 1% of median
+                print(f"Auto-adjusting detection limit from {detection_limit:.6f} to {auto_detection_limit:.6f} based on data scale")
+            
+            # Remove values below detection limit
+            valid_mask &= filtered_df[value_column] >= auto_detection_limit
+            
+            # Remove quality-flagged data (if Quality_Flags column exists)
+            if 'Quality_Flags' in filtered_df.columns:
+                # Remove rows with low_signal flags
+                quality_mask = ~filtered_df['Quality_Flags'].str.contains('low_signal', na=False)
+                valid_mask &= quality_mask
+                print(f"Removed {(~quality_mask).sum()} low_signal flagged points")
+            
+            # Remove suspiciously regular small values (likely detection limit artifacts)
+            # Look for repeated very small values (e.g., 0.00000073)
+            if len(data_values) > 10:
+                # Find the most common small values
+                small_values = data_values[data_values < data_median * 0.1]
+                if len(small_values) > 3:
+                    from collections import Counter
+                    value_counts = Counter(np.round(small_values, 8))  # Round to avoid floating point issues
+                    
+                    # If any value appears more than 3 times and is very small, it's likely noise
+                    for value, count in value_counts.items():
+                        if count >= 3 and value < data_median * 0.05:
+                            noise_mask = np.abs(filtered_df[value_column] - value) < 1e-8
+                            valid_mask &= ~noise_mask
+                            print(f"Removed {noise_mask.sum()} repeated noise values around {value:.8f}")
+            
+            # Remove values below threshold of rolling average
+            if threshold_percent > 0:
+                rolling_avg = filtered_df[value_column].rolling(window=5, min_periods=1).mean()
+                threshold_values = rolling_avg * (threshold_percent / 100.0)
+                rolling_mask = (filtered_df[value_column] >= threshold_values) | (filtered_df[time_column] == 0)
+                valid_mask &= rolling_mask
+            
+            # Apply filter
+            original_count = len(filtered_df)
+            filtered_df = filtered_df[valid_mask].reset_index(drop=True)
+            filtered_count = len(filtered_df)
+            
+            print(f"Noise filtering: Removed {original_count - filtered_count} points ({original_count - filtered_count}/{original_count} = {100*(original_count - filtered_count)/original_count:.1f}%)")
+            
+            return filtered_df
+            
+        except Exception as e:
+            raise TDACalculationError(f"Data filtering failed: {str(e)}")
+    
+    @staticmethod
+    def ppm_to_mol_conversion(ppm_values: np.ndarray, 
+                             sample_mass_g: float,
+                             surface_area_cm2: float = None) -> np.ndarray:
+        """
+        Convert hydrogen concentrations from ppm to mol units
+        
+        Args:
+            ppm_values: Array of H concentrations in ppm
+            sample_mass_g: Sample mass in grams
+            surface_area_cm2: Surface area for surface normalization (optional)
+        
+        Returns:
+            Array of H content in mol (or mol/cm² if surface_area provided)
+        """
+        try:
+            # H2 molecular weight = 2.016 g/mol
+            H2_MW = 2.016
+            
+            # Convert ppm to mol
+            # ppm = mg H2 / kg sample = (mg H2 / 1000 g sample)
+            # mol H2 = (ppm × sample_mass_g × 1e-6) / H2_MW
+            mol_values = (ppm_values * sample_mass_g * 1e-6) / H2_MW
+            
+            # Surface normalize if area provided
+            if surface_area_cm2 is not None and surface_area_cm2 > 0:
+                mol_values = mol_values / surface_area_cm2
+            
+            return mol_values
+            
+        except Exception as e:
+            raise TDACalculationError(f"Unit conversion failed: {str(e)}")
+    
+    @staticmethod
+    def mol_to_ppm_conversion(mol_values: np.ndarray,
+                             sample_mass_g: float,
+                             surface_area_cm2: float = None) -> np.ndarray:
+        """
+        Convert hydrogen concentrations from mol to ppm units
+        
+        Args:
+            mol_values: Array of H content in mol (or mol/cm²)
+            sample_mass_g: Sample mass in grams
+            surface_area_cm2: Surface area if mol_values are surface normalized
+        
+        Returns:
+            Array of H concentrations in ppm
+        """
+        try:
+            # H2 molecular weight = 2.016 g/mol
+            H2_MW = 2.016
+            
+            mol_total = mol_values.copy()
+            
+            # Convert from surface normalized if needed
+            if surface_area_cm2 is not None and surface_area_cm2 > 0:
+                mol_total = mol_values * surface_area_cm2
+            
+            # Convert mol to ppm
+            # ppm = (mol H2 × H2_MW × 1e6) / sample_mass_g
+            ppm_values = (mol_total * H2_MW * 1e6) / sample_mass_g
+            
+            return ppm_values
+            
+        except Exception as e:
+            raise TDACalculationError(f"Unit conversion failed: {str(e)}")
+
+
+class TemperatureCorrectionUtils:
+    """Utility functions for temperature-dependent diffusion analysis"""
+    
+    @staticmethod
+    def arrhenius_temperature_correction(D_measured: float,
+                                       T_measured: float,
+                                       T_target: float,
+                                       activation_energy_kJ_mol: float = 7.5) -> float:
+        """
+        Apply Arrhenius temperature correction to diffusion coefficient
+        
+        D(T) = D₀ × exp(-Q/RT)
+        
+        Args:
+            D_measured: Measured diffusion coefficient (cm²/s)
+            T_measured: Temperature of measurement (°C)
+            T_target: Target temperature for correction (°C)
+            activation_energy_kJ_mol: Activation energy in kJ/mol
+        
+        Returns:
+            Temperature-corrected diffusion coefficient (cm²/s)
+        """
+        try:
+            # Convert temperatures to Kelvin
+            T_meas_K = T_measured + 273.15
+            T_targ_K = T_target + 273.15
+            
+            # Gas constant R = 8.314 J/(mol·K) = 0.008314 kJ/(mol·K)
+            R = 0.008314
+            
+            # Apply Arrhenius equation
+            # D_target = D_measured × exp(Q/R × (1/T_measured - 1/T_target))
+            exponent = (activation_energy_kJ_mol / R) * (1/T_meas_K - 1/T_targ_K)
+            D_corrected = D_measured * np.exp(exponent)
+            
+            return float(D_corrected)
+            
+        except Exception as e:
+            raise TDACalculationError(f"Temperature correction failed: {str(e)}")
+    
+    @staticmethod
+    def get_literature_D_at_temperature(material: str = "steel",
+                                      temperature_C: float = 25) -> Dict[str, float]:
+        """
+        Get literature diffusion coefficient values at specified temperature
+        
+        Args:
+            material: Material type
+            temperature_C: Temperature in Celsius
+        
+        Returns:
+            Dictionary with literature D values
+        """
+        try:
+            # Base values at room temperature (25°C)
+            base_values = {
+                "steel": 1.0e-7,  # cm²/s
+                "iron": 1.0e-8,
+                "austenitic_steel": 1.0e-7,
+                "ferritic_steel": 5.0e-8
+            }
+            
+            # Default activation energy (kJ/mol)
+            activation_energies = {
+                "steel": 7.5,
+                "iron": 8.0,
+                "austenitic_steel": 7.5,
+                "ferritic_steel": 10.0
+            }
+            
+            material_key = material.lower()
+            if material_key not in base_values:
+                material_key = "steel"  # Default fallback
+            
+            base_D = base_values[material_key]
+            Q = activation_energies[material_key]
+            
+            # Apply temperature correction
+            D_at_temp = TemperatureCorrectionUtils.arrhenius_temperature_correction(
+                base_D, 25.0, temperature_C, Q
+            )
+            
+            return {
+                "D_literature": D_at_temp,
+                "base_D_25C": base_D,
+                "activation_energy": Q,
+                "temperature": temperature_C,
+                "material": material_key
+            }
+            
+        except Exception as e:
+            return {
+                "D_literature": 1.0e-7,
+                "base_D_25C": 1.0e-7,
+                "activation_energy": 7.5,
+                "temperature": temperature_C,
+                "material": "steel",
+                "error": str(e)
+            }
+
+
 class DiffusionAnalysisEngine:
     """Main engine for performing complete diffusion analysis"""
     
@@ -496,6 +764,8 @@ class DiffusionAnalysisEngine:
         self.plot_calculator = DiffusionPlotCalculator()
         self.regression_analyzer = LinearRegressionAnalyzer()
         self.diffusion_calculator = DiffusionCoefficientCalculator()
+        self.filter_utils = DataFilteringUtils()
+        self.temp_utils = TemperatureCorrectionUtils()
     
     def analyze_diffusion_behavior(self,
                                  time_minutes: List[float],

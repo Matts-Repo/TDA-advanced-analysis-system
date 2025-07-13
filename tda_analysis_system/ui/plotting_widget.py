@@ -62,6 +62,10 @@ class PlottingWidget(QWidget):
         styling_group = self.create_styling_section()
         layout.addWidget(styling_group)
         
+        # Plot Type Options Section  
+        plot_options_group = self.create_plot_options_section()
+        layout.addWidget(plot_options_group)
+        
         # Data Filtering Section
         filtering_group = self.create_filtering_section()
         layout.addWidget(filtering_group)
@@ -172,6 +176,87 @@ class PlottingWidget(QWidget):
         
         group.setLayout(layout)
         return group
+    
+    def create_plot_options_section(self):
+        """Plot type and display options"""
+        group = QGroupBox("Plot Options")
+        layout = QVBoxLayout()
+        
+        # Axis mode selection
+        axis_layout = QVBoxLayout()
+        axis_layout.addWidget(QLabel("Axis Mode:"))
+        
+        axis_radio_layout = QHBoxLayout()
+        self.dual_axis_radio = QRadioButton("Dual Axis (mol + ppm)")
+        self.dual_axis_radio.setChecked(True)
+        self.dual_axis_radio.toggled.connect(self.on_axis_mode_changed)
+        axis_radio_layout.addWidget(self.dual_axis_radio)
+        
+        self.single_axis_radio = QRadioButton("Single Axis")
+        self.single_axis_radio.toggled.connect(self.on_axis_mode_changed)
+        axis_radio_layout.addWidget(self.single_axis_radio)
+        
+        axis_layout.addLayout(axis_radio_layout)
+        
+        # Single axis unit selection (only visible when single axis is selected)
+        self.single_axis_unit_layout = QHBoxLayout()
+        self.single_axis_unit_layout.addWidget(QLabel("Units:"))
+        
+        self.units_mol_radio = QRadioButton("mol/cm²")
+        self.units_mol_radio.setChecked(True)
+        self.units_mol_radio.toggled.connect(self.update_plot)
+        self.single_axis_unit_layout.addWidget(self.units_mol_radio)
+        
+        self.units_ppm_radio = QRadioButton("ppm")
+        self.units_ppm_radio.toggled.connect(self.update_plot)
+        self.single_axis_unit_layout.addWidget(self.units_ppm_radio)
+        
+        # Create widget to hold the unit selection layout
+        self.single_axis_unit_widget = QWidget()
+        self.single_axis_unit_widget.setLayout(self.single_axis_unit_layout)
+        self.single_axis_unit_widget.setVisible(False)  # Hidden by default
+        
+        axis_layout.addWidget(self.single_axis_unit_widget)
+        layout.addLayout(axis_layout)
+        
+        # Dual axis display options (only visible when dual axis is selected)
+        dual_axis_options_layout = QVBoxLayout()
+        dual_axis_options_layout.addWidget(QLabel("Dual Axis Display:"))
+        
+        self.primary_only_check = QCheckBox("Show only primary data (mol/cm²)")
+        self.primary_only_check.stateChanged.connect(self.update_plot)
+        dual_axis_options_layout.addWidget(self.primary_only_check)
+        
+        self.clean_legend_check = QCheckBox("Clean legend (no unit labels)")
+        self.clean_legend_check.setChecked(True)
+        self.clean_legend_check.stateChanged.connect(self.update_plot)
+        dual_axis_options_layout.addWidget(self.clean_legend_check)
+        
+        # Create widget to hold dual axis options
+        self.dual_axis_options_widget = QWidget()
+        self.dual_axis_options_widget.setLayout(dual_axis_options_layout)
+        self.dual_axis_options_widget.setVisible(True)  # Visible by default
+        
+        layout.addWidget(self.dual_axis_options_widget)
+        
+        # Zero filtering checkbox
+        self.exclude_zeros_check = QCheckBox("Exclude zero values")
+        self.exclude_zeros_check.stateChanged.connect(self.update_plot)
+        layout.addWidget(self.exclude_zeros_check)
+        
+        group.setLayout(layout)
+        return group
+    
+    def on_axis_mode_changed(self):
+        """Handle axis mode change to show/hide relevant controls"""
+        is_dual_axis = self.dual_axis_radio.isChecked()
+        
+        # Show/hide controls based on mode
+        self.single_axis_unit_widget.setVisible(not is_dual_axis)
+        self.dual_axis_options_widget.setVisible(is_dual_axis)
+        
+        # Update the plot
+        self.update_plot()
     
     def create_filtering_section(self):
         """Data filtering options"""
@@ -446,7 +531,11 @@ class PlottingWidget(QWidget):
         try:
             # Update filter options for all datasets
             for dataset in self.loaded_datasets.values():
-                # Update filter options
+                # Update zero filtering options
+                dataset.filter_options.exclude_zeros = self.exclude_zeros_check.isChecked()
+                dataset.filter_options.detection_limit = 0.001  # Lower default for TDA data
+                
+                # Update other filter options
                 dataset.filter_options.remove_outliers = self.outlier_check.isChecked()
                 dataset.filter_options.outlier_method = self.outlier_method_combo.currentText()
                 dataset.filter_options.outlier_threshold = self.outlier_threshold_spin.value()
@@ -470,11 +559,20 @@ class PlottingWidget(QWidget):
             
             # Create plot options
             options = PlotOptions()
+            options.dual_axis = self.dual_axis_radio.isChecked()
             options.title = self.title_edit.text()
             options.ylabel = self.ylabel_edit.text()
             options.show_grid = self.grid_check.isChecked()
             options.show_legend = self.legend_check.isChecked()
             options.log_y = self.log_y_check.isChecked()
+            
+            # Set plotting preferences with safe defaults
+            options.primary_only = getattr(self, 'primary_only_check', None) and self.primary_only_check.isChecked()
+            options.clean_legend = getattr(self, 'clean_legend_check', None) and self.clean_legend_check.isChecked()
+            if hasattr(self, 'units_mol_radio') and hasattr(self, 'units_ppm_radio'):
+                options.single_axis_units = "mol" if self.units_mol_radio.isChecked() else "ppm"
+            else:
+                options.single_axis_units = "mol"  # Default
             
             # Generate plot
             datasets_list = list(self.loaded_datasets.values())
