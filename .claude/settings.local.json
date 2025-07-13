@@ -11,7 +11,9 @@
       "Bash(ls:*)",
       "Bash(grep:*)",
       "Bash(rg:*)",
-      "Bash(head:*)"
+      "Bash(head:*)",
+      "WebFetch(domain:docs.anthropic.com)",
+      "Bash(git add:*)"
     ],
     "deny": []
   }

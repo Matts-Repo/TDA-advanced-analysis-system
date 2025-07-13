@@ -1,0 +1,48 @@
+{
+  "calibration_id": "07-05-25",
+  "date": "2025-07-08",
+  "processing_timestamp": "2025-07-08T01:55:01.884985",
+  "gas_concentration_ppm": 61.0,
+  "mean_peak_area": 299163.8721590909,
+  "std_deviation": 2226.7943683854496,
+  "cv_percent": 0.7443393322577646,
+  "num_runs": 11,
+  "min_peak_area": 293106.3125,
+  "max_peak_area": 301388.375,
+  "median_peak_area": 299336.1875,
+  "raw_peak_areas": [
+    293106.3125,
+    298249.1875,
+    298945.125,
+    299610.90625,
+    299336.1875,
+    299091.90625,
+    301388.375,
+    300602.9375,
+    299085.34375,
+    300880.21875,
+    300506.09375
+  ],
+  "raw_timestamps": [
+    "1746614619",
+    "1746614943",
+    "1746615266",
+    "1746615587",
+    "1746615910",
+    "1746616232",
+    "1746616554",
+    "1746616877",
+    "1746617201",
+    "1746617523",
+    "1746617848"
+  ],
+  "outlier_indices": [],
+  "quality_flags": [
+    "WARNING: Very high peak areas - check for overload"
+  ],
+  "quality_score": 100.0,
+  "is_valid": true,
+  "source_folder": "H:/TDA/data grab 07-07-25/calibrations/07-05-25_Hcalibration_Kai 2025-05-07 11-43-03",
+  "operator": "SYSTEM",
+  "notes": ""
+}

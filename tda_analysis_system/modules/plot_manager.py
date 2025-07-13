@@ -17,6 +17,7 @@ import json
 from dataclasses import dataclass, field
 
 from .error_handling import TDAFileError, TDAError
+from .calcs import DiffusionAnalysisEngine, DiffusionAnalysisResult
 
 
 @dataclass
@@ -55,7 +56,14 @@ class PlotDataset:
     h_ppm_per_min: List[float] = field(default_factory=list)
     h_ppm_over_cycle: List[float] = field(default_factory=list)
     cumulative_h_ppm: List[float] = field(default_factory=list)
+    h_mol_cm2_per_min: List[float] = field(default_factory=list)      # For surface normalized data
+    h_mol_cm2_over_cycle: List[float] = field(default_factory=list)   # For surface normalized data
+    cumulative_h_mol_cm2: List[float] = field(default_factory=list)   # For surface normalized data
     quality_flags: List[str] = field(default_factory=list)
+    
+    # Calculation mode detection
+    calculation_mode: str = "mass_normalized"  # "mass_normalized" or "surface_normalized"
+    surface_area: float = 0.0                  # cm² for surface normalized mode
     
     # Plotting configuration
     style: 'DatasetStyle' = field(default_factory=lambda: DatasetStyle())
@@ -66,9 +74,15 @@ class PlotDataset:
         x_data = self.time_minutes
         
         if plot_type == "h_ppm_per_min":
-            y_data = self.h_ppm_per_min
+            if self.calculation_mode == "surface_normalized" and self.h_mol_cm2_per_min:
+                y_data = self.h_mol_cm2_per_min
+            else:
+                y_data = self.h_ppm_per_min
         elif plot_type == "cumulative_h_ppm":
-            y_data = self.cumulative_h_ppm
+            if self.calculation_mode == "surface_normalized" and self.cumulative_h_mol_cm2:
+                y_data = self.cumulative_h_mol_cm2
+            else:
+                y_data = self.cumulative_h_ppm
         elif plot_type == "peak_areas":
             y_data = self.peak_areas
         else:
@@ -213,26 +227,54 @@ class ProcessedCSVParser:
             # Parse data columns (skip comment lines)
             df = pd.read_csv(csv_path, comment='#')
             
-            # Validate expected columns
+            # Detect calculation mode based on column presence
+            surface_area_columns = ['H_mol_cm2_per_min', 'H_mol_cm2_over_cycle', 'Cumulative_H_mol_cm2']
+            has_surface_columns = all(col in df.columns for col in surface_area_columns)
+            
+            if has_surface_columns:
+                dataset.calculation_mode = "surface_normalized"
+                # Extract surface area from metadata if available
+                dataset.surface_area = float(metadata.get('surface_area', 0))
+            else:
+                dataset.calculation_mode = "mass_normalized"
+            
+            # Validate core required columns
             required_columns = [
                 'Run', 'Timestamp', 'Time_minutes', 'Peak_Area_µVs', 
-                'Peak_Height_µV', 'H_ppm_per_min', 'H_ppm_over_cycle', 
-                'Cumulative_H_ppm'
+                'Peak_Height_µV'
             ]
+            
+            # Add calculation-specific required columns
+            if dataset.calculation_mode == "surface_normalized":
+                required_columns.extend(surface_area_columns)
+                required_columns.extend(['H_ppm_per_min', 'H_ppm_over_cycle', 'Cumulative_H_ppm'])  # Also included for reference
+            else:
+                required_columns.extend(['H_ppm_per_min', 'H_ppm_over_cycle', 'Cumulative_H_ppm'])
             
             missing_columns = [col for col in required_columns if col not in df.columns]
             if missing_columns:
                 raise ValueError(f"Missing required columns: {missing_columns}")
             
-            # Extract data arrays
+            # Extract basic data arrays
             dataset.run_numbers = df['Run'].tolist()
             dataset.timestamps = df['Timestamp'].tolist()
             dataset.time_minutes = df['Time_minutes'].tolist()
             dataset.peak_areas = df['Peak_Area_µVs'].tolist()
             dataset.peak_heights = df['Peak_Height_µV'].tolist()
-            dataset.h_ppm_per_min = df['H_ppm_per_min'].tolist()
-            dataset.h_ppm_over_cycle = df['H_ppm_over_cycle'].tolist()
-            dataset.cumulative_h_ppm = df['Cumulative_H_ppm'].tolist()
+            
+            # Extract calculation-specific data
+            if dataset.calculation_mode == "surface_normalized":
+                dataset.h_mol_cm2_per_min = df['H_mol_cm2_per_min'].tolist()
+                dataset.h_mol_cm2_over_cycle = df['H_mol_cm2_over_cycle'].tolist()
+                dataset.cumulative_h_mol_cm2 = df['Cumulative_H_mol_cm2'].tolist()
+                # Also extract mass-normalized for reference
+                dataset.h_ppm_per_min = df['H_ppm_per_min'].tolist()
+                dataset.h_ppm_over_cycle = df['H_ppm_over_cycle'].tolist()
+                dataset.cumulative_h_ppm = df['Cumulative_H_ppm'].tolist()
+            else:
+                dataset.h_ppm_per_min = df['H_ppm_per_min'].tolist()
+                dataset.h_ppm_over_cycle = df['H_ppm_over_cycle'].tolist()
+                dataset.cumulative_h_ppm = df['Cumulative_H_ppm'].tolist()
             
             # Extract quality flags if present
             if 'Quality_Flags' in df.columns:
@@ -271,7 +313,7 @@ class ProcessedCSVParser:
                         # Parse numeric values
                         if key in ['sample_weight', 'flow_rate', 'cycle_time', 'quality_score', 
                                  'total_hydrogen_released', 'maximum_evolution_rate', 
-                                 'average_evolution_rate', 'experiment_duration']:
+                                 'average_evolution_rate', 'experiment_duration', 'surface_area']:
                             try:
                                 # Extract numeric part (remove units)
                                 numeric_part = value.split()[0]
@@ -441,11 +483,20 @@ class PlotGenerator:
         self.figure = Figure(figsize=options.figure_size, dpi=options.dpi)
         self.axes = self.figure.add_subplot(111)
         
-        # Set Y-axis label based on plot type
+        # Set Y-axis label based on plot type and calculation mode
+        # Check if any dataset is surface normalized to determine labeling
+        has_surface_normalized = any(dataset.calculation_mode == "surface_normalized" for dataset in datasets)
+        
         if plot_type == "h_ppm_per_min":
-            default_ylabel = "Hydrogen Evolution Rate (ppm/min)"
+            if has_surface_normalized:
+                default_ylabel = "Hydrogen Evolution Rate (mol/cm²/min)"
+            else:
+                default_ylabel = "Hydrogen Evolution Rate (ppm/min)"
         elif plot_type == "cumulative_h_ppm":
-            default_ylabel = "Cumulative Hydrogen Content (ppm)"
+            if has_surface_normalized:
+                default_ylabel = "Cumulative Hydrogen (mol/cm²)"
+            else:
+                default_ylabel = "Cumulative Hydrogen Content (ppm)"
         elif plot_type == "peak_areas":
             default_ylabel = "Peak Area (µV*s)"
         else:
@@ -543,6 +594,147 @@ class PlotGenerator:
         if options.tight_layout:
             self.figure.tight_layout()
     
+    def create_diffusion_plot(self, dataset: PlotDataset,
+                             plot_type: str = "1_sqrt_t",
+                             tail_start_time: float = 120.0,
+                             show_linear_fit: bool = True,
+                             calculate_D: bool = True,
+                             sample_thickness: float = 0.1,
+                             options: PlotOptions = None) -> Tuple[Figure, DiffusionAnalysisResult]:
+        """
+        Generate diffusion analysis plot with linear regression
+        
+        Args:
+            dataset: PlotDataset with TDA data
+            plot_type: "1_sqrt_t", "sqrt_t", or "log_log"
+            tail_start_time: Start time for tail region (minutes)
+            show_linear_fit: Whether to show linear regression line
+            calculate_D: Whether to calculate diffusion coefficient
+            sample_thickness: Sample thickness for D calculation (cm)
+            options: PlotOptions for formatting
+        
+        Returns:
+            (matplotlib Figure, DiffusionAnalysisResult)
+        """
+        if options is None:
+            options = PlotOptions()
+        
+        try:
+            # Initialize diffusion analysis engine
+            diffusion_engine = DiffusionAnalysisEngine()
+            
+            # Perform diffusion analysis
+            analysis_result = diffusion_engine.analyze_diffusion_behavior(
+                time_minutes=dataset.time_minutes,
+                desorption_rate=dataset.h_ppm_per_min if dataset.calculation_mode == "mass_normalized" else dataset.h_mol_cm2_per_min,
+                cumulative_hydrogen=dataset.cumulative_h_ppm if dataset.calculation_mode == "mass_normalized" else dataset.cumulative_h_mol_cm2,
+                analysis_type=plot_type,
+                tail_start=tail_start_time,
+                sample_thickness=sample_thickness,
+                calculate_D=calculate_D
+            )
+            
+            # Create figure and axes
+            self.figure = Figure(figsize=options.figure_size, dpi=options.dpi)
+            self.axes = self.figure.add_subplot(111)
+            
+            # Set labels based on plot type
+            if plot_type == "1_sqrt_t":
+                xlabel = "1/√t (s⁻⁰·⁵)"
+                if dataset.calculation_mode == "surface_normalized":
+                    ylabel = "Hydrogen Evolution Rate (mol/cm²/min)"
+                else:
+                    ylabel = "Hydrogen Evolution Rate (ppm/min)"
+                title = "Desorption Rate vs 1/√t - Diffusion Analysis"
+            elif plot_type == "sqrt_t":
+                xlabel = "√t (s⁰·⁵)"
+                if dataset.calculation_mode == "surface_normalized":
+                    ylabel = "Cumulative Hydrogen (mol/cm²)"
+                else:
+                    ylabel = "Cumulative Hydrogen (ppm)"
+                title = "Cumulative Hydrogen vs √t - Diffusion Analysis"
+            elif plot_type == "log_log":
+                xlabel = "log(Time) (min)"
+                if dataset.calculation_mode == "surface_normalized":
+                    ylabel = "log(Evolution Rate) (mol/cm²/min)"
+                else:
+                    ylabel = "log(Evolution Rate) (ppm/min)"
+                title = "Log-Log Plot - Diffusion Analysis"
+            else:
+                xlabel = "X"
+                ylabel = "Y"
+                title = "Diffusion Analysis"
+            
+            # Plot the data points
+            self.axes.scatter(
+                analysis_result.x_data, 
+                analysis_result.y_data,
+                alpha=0.7,
+                s=30,
+                color='#1f77b4',
+                label=f'{dataset.get_display_label()} (tail region)',
+                zorder=2
+            )
+            
+            # Plot linear fit if requested
+            if show_linear_fit and analysis_result.fit_x and analysis_result.fit_y:
+                self.axes.plot(
+                    analysis_result.fit_x,
+                    analysis_result.fit_y,
+                    color='red',
+                    linestyle='--',
+                    linewidth=2,
+                    label=f'Linear fit (R² = {analysis_result.r_squared:.3f})',
+                    zorder=3
+                )
+                
+                # Add equation text
+                equation_text = f'y = {analysis_result.slope:.2e}x + {analysis_result.intercept:.2e}'
+                self.axes.text(
+                    0.05, 0.95,
+                    equation_text,
+                    transform=self.axes.transAxes,
+                    fontsize=10,
+                    verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8)
+                )
+                
+                # Add R² text
+                r2_text = f'R² = {analysis_result.r_squared:.4f}\nFit quality: {analysis_result.goodness_of_fit}'
+                self.axes.text(
+                    0.05, 0.85,
+                    r2_text,
+                    transform=self.axes.transAxes,
+                    fontsize=10,
+                    verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='lightblue', alpha=0.8)
+                )
+                
+                # Add diffusion coefficient if calculated
+                if calculate_D and plot_type == "1_sqrt_t" and analysis_result.diffusion_coefficient > 0:
+                    d_text = f'D = {analysis_result.diffusion_coefficient:.2e} cm²/s'
+                    self.axes.text(
+                        0.05, 0.75,
+                        d_text,
+                        transform=self.axes.transAxes,
+                        fontsize=10,
+                        verticalalignment='top',
+                        bbox=dict(boxstyle='round', facecolor='lightgreen', alpha=0.8)
+                    )
+            
+            # Set labels and title
+            self.axes.set_xlabel(options.xlabel or xlabel, fontsize=12)
+            self.axes.set_ylabel(options.ylabel or ylabel, fontsize=12)
+            self.axes.set_title(options.title or title, fontsize=14, fontweight='bold')
+            
+            # Apply formatting
+            self._apply_plot_formatting(options, ylabel)
+            
+            return self.figure, analysis_result
+            
+        except Exception as e:
+            raise TDAError(f"Diffusion plot generation failed: {str(e)}")
+
     def update_dataset_style(self, dataset: PlotDataset):
         """Update the appearance of a specific dataset"""
         if hasattr(dataset, '_plot_line') and dataset._plot_line:
@@ -639,6 +831,29 @@ class PlotManager:
         except Exception as e:
             raise TDAError(f"Plot generation failed: {str(e)}")
     
+    def generate_diffusion_plot(self, dataset: PlotDataset, 
+                               plot_type: str = "1_sqrt_t",
+                               tail_start_time: float = 120.0,
+                               show_linear_fit: bool = True,
+                               calculate_D: bool = True,
+                               sample_thickness: float = 0.1,
+                               options: PlotOptions = None) -> Tuple[Figure, DiffusionAnalysisResult]:
+        """Create diffusion analysis plot with specified options"""
+        try:
+            plot_generator = PlotGenerator()
+            figure, analysis_result = plot_generator.create_diffusion_plot(
+                dataset=dataset,
+                plot_type=plot_type,
+                tail_start_time=tail_start_time,
+                show_linear_fit=show_linear_fit,
+                calculate_D=calculate_D,
+                sample_thickness=sample_thickness,
+                options=options
+            )
+            return figure, analysis_result
+        except Exception as e:
+            raise TDAError(f"Diffusion plot generation failed: {str(e)}")
+
     def export_plot(self, figure: Figure, export_options: ExportOptions) -> str:
         """Export plot to specified format"""
         try:

@@ -38,11 +38,16 @@ class ExperimentData:
     flow_rate: float = 0.0                                   # ml/min
     cycle_time: float = 0.0                                  # minutes
     calibration_id: str = ""
+    surface_area: float = 0.0                                # cm²
+    calculation_mode: str = "mass_normalized"                # "mass_normalized" or "surface_normalized"
     
     # Calculated results (parallel arrays)
     h_ppm_per_min: List[float] = field(default_factory=list)
     h_ppm_over_cycle: List[float] = field(default_factory=list)
     cumulative_h_ppm: List[float] = field(default_factory=list)
+    h_mol_cm2_per_min: List[float] = field(default_factory=list)      # For surface normalized mode
+    h_mol_cm2_over_cycle: List[float] = field(default_factory=list)   # For surface normalized mode
+    cumulative_h_mol_cm2: List[float] = field(default_factory=list)   # For surface normalized mode
     
     # Quality tracking
     missing_runs: List[int] = field(default_factory=list)    # Run numbers that failed
@@ -74,18 +79,36 @@ class ExperimentData:
     
     def get_summary_statistics(self) -> Dict:
         """Calculate summary statistics for the experiment"""
-        if not self.h_ppm_over_cycle:
-            return {"error": "No calculated data available"}
-        
-        return {
-            "total_hydrogen_ppm": sum(self.h_ppm_over_cycle),
-            "max_rate_ppm_per_min": max(self.h_ppm_per_min) if self.h_ppm_per_min else 0,
-            "avg_rate_ppm_per_min": sum(self.h_ppm_per_min) / len(self.h_ppm_per_min) if self.h_ppm_per_min else 0,
-            "duration_minutes": max(self.time_minutes) if self.time_minutes else 0,
-            "successful_runs": len(self.run_numbers),
-            "failed_runs": len(self.missing_runs),
-            "success_rate_percent": len(self.run_numbers) / (len(self.run_numbers) + len(self.missing_runs)) * 100 if (len(self.run_numbers) + len(self.missing_runs)) > 0 else 0
-        }
+        if self.calculation_mode == "surface_normalized":
+            if not self.h_mol_cm2_over_cycle:
+                return {"error": "No calculated data available"}
+            
+            return {
+                "total_hydrogen_mol_cm2": sum(self.h_mol_cm2_over_cycle),
+                "max_rate_mol_cm2_per_min": max(self.h_mol_cm2_per_min) if self.h_mol_cm2_per_min else 0,
+                "avg_rate_mol_cm2_per_min": sum(self.h_mol_cm2_per_min) / len(self.h_mol_cm2_per_min) if self.h_mol_cm2_per_min else 0,
+                "duration_minutes": max(self.time_minutes) if self.time_minutes else 0,
+                "successful_runs": len(self.run_numbers),
+                "failed_runs": len(self.missing_runs),
+                "success_rate_percent": len(self.run_numbers) / (len(self.run_numbers) + len(self.missing_runs)) * 100 if (len(self.run_numbers) + len(self.missing_runs)) > 0 else 0,
+                "calculation_mode": self.calculation_mode,
+                "surface_area_cm2": self.surface_area
+            }
+        else:
+            if not self.h_ppm_over_cycle:
+                return {"error": "No calculated data available"}
+            
+            return {
+                "total_hydrogen_ppm": sum(self.h_ppm_over_cycle),
+                "max_rate_ppm_per_min": max(self.h_ppm_per_min) if self.h_ppm_per_min else 0,
+                "avg_rate_ppm_per_min": sum(self.h_ppm_per_min) / len(self.h_ppm_per_min) if self.h_ppm_per_min else 0,
+                "duration_minutes": max(self.time_minutes) if self.time_minutes else 0,
+                "successful_runs": len(self.run_numbers),
+                "failed_runs": len(self.missing_runs),
+                "success_rate_percent": len(self.run_numbers) / (len(self.run_numbers) + len(self.missing_runs)) * 100 if (len(self.run_numbers) + len(self.missing_runs)) > 0 else 0,
+                "calculation_mode": self.calculation_mode,
+                "sample_weight_g": self.sample_weight
+            }
 
 
 @dataclass
@@ -131,9 +154,13 @@ class HydrogenCalculator:
     def __init__(self):
         # Physical constants (do not change)
         self.CARRIER_GAS_MOL_PER_SEC = 7.44e-6  # For Argon carrier gas
-        self.MOLAR_WEIGHT_H2 = 2.0              # g/mol
+        self.MOLAR_WEIGHT_H2 = 2.016            # g/mol (more precise)
         self.SECONDS_PER_MINUTE = 60
         self.CONVERSION_FACTOR = 0.00008928          # Pre-calculated: 7.44e-6 × 1e6 × 2 × 60 / 10
+        
+        # Constants for surface area normalization
+        self.STP_MOLAR_VOLUME = 22.414          # L/mol at STP
+        self.PPM_TO_FRACTION = 1e-6             # Convert ppm to fraction
         
     def calculate_h_ppm_per_minute(self, peak_area: float, calibration_data: CalibrationData, 
                                   flow_rate: float, sample_weight: float) -> float:
@@ -167,6 +194,85 @@ class HydrogenCalculator:
         h_ppm_per_min = (peak_area * h_standard_ppm * flow_rate * self.CONVERSION_FACTOR) / (h_standard_peak_area * sample_weight)
         
         return h_ppm_per_min
+    
+    def calculate_h_mol_cm2_per_minute(self, peak_area: float, calibration_data: CalibrationData, 
+                                      flow_rate: float, surface_area: float) -> float:
+        """
+        Calculate hydrogen desorption as moles per square centimeter per minute:
+        
+        H_mol_cm2_per_minute = (peak_area × calibration_factor × conversion_to_moles) / surface_area
+        
+        Where:
+        - calibration_factor = H_standard_ppm / H_standard_peak_area
+        - conversion_to_moles accounts for flow rate, gas law, and molecular weight
+        
+        Args:
+            peak_area: Measured peak area (µV*s)
+            calibration_data: Calibration standard data
+            flow_rate: Gas flow rate (ml/min)
+            surface_area: Sample surface area (cm²)
+            
+        Returns:
+            Hydrogen concentration rate (mol/cm²/min)
+        """
+        # Validate inputs
+        validation_warnings = self.validate_surface_calculation_inputs(
+            peak_area, calibration_data, flow_rate, surface_area
+        )
+        if any("ERROR" in w for w in validation_warnings):
+            raise TDACalculationError(f"Invalid inputs: {'; '.join(validation_warnings)}")
+        
+        # Extract calibration parameters
+        h_standard_ppm = calibration_data.gas_concentration_ppm
+        h_standard_peak_area = calibration_data.mean_peak_area
+        
+        # Calculate calibration factor (ppm per unit peak area)
+        calibration_factor = h_standard_ppm / h_standard_peak_area
+        
+        # Calculate hydrogen concentration in ppm at this flow rate
+        h_ppm_at_flow = peak_area * calibration_factor
+        
+        # Convert ppm to moles per minute using ideal gas law
+        # At STP: ppm × flow_rate_L/min × (1 mol / 22.414 L) × (ppm_to_fraction)
+        flow_rate_L_per_min = flow_rate / 1000.0  # Convert ml/min to L/min
+        h_mol_per_min = h_ppm_at_flow * self.PPM_TO_FRACTION * flow_rate_L_per_min / self.STP_MOLAR_VOLUME
+        
+        # Normalize by surface area
+        h_mol_cm2_per_min = h_mol_per_min / surface_area
+        
+        return h_mol_cm2_per_min
+    
+    def calculate_h_mol_cm2_over_cycle(self, h_mol_cm2_per_min: float, cycle_time: float) -> float:
+        """
+        Calculate hydrogen amount evolved over the cycle period in mol/cm²
+        
+        Args:
+            h_mol_cm2_per_min: Hydrogen evolution rate (mol/cm²/min)
+            cycle_time: Cycle duration (minutes)
+            
+        Returns:
+            Hydrogen evolved during cycle (mol/cm²)
+        """
+        return h_mol_cm2_per_min * cycle_time
+    
+    def calculate_cumulative_hydrogen_surface(self, h_mol_cm2_over_cycle_list: List[float]) -> List[float]:
+        """
+        Calculate running total of hydrogen evolution in mol/cm²
+        
+        Args:
+            h_mol_cm2_over_cycle_list: List of hydrogen evolved per cycle (mol/cm²)
+            
+        Returns:
+            List of cumulative hydrogen totals (mol/cm²)
+        """
+        cumulative = []
+        running_total = 0.0
+        
+        for h_cycle in h_mol_cm2_over_cycle_list:
+            running_total += h_cycle
+            cumulative.append(running_total)
+            
+        return cumulative
     
     def calculate_h_ppm_over_cycle(self, h_ppm_per_min: float, cycle_time: float) -> float:
         """
@@ -220,6 +326,43 @@ class HydrogenCalculator:
             warnings.append("WARNING: Very low sample weight - results may be imprecise")
         elif sample_weight > 50:
             warnings.append("WARNING: Very high sample weight - unusual for TDA")
+        
+        # Flow rate validation
+        if flow_rate <= 0:
+            warnings.append("ERROR: Flow rate must be positive")
+        elif flow_rate < 1:
+            warnings.append("WARNING: Very low flow rate")
+        elif flow_rate > 100:
+            warnings.append("WARNING: Very high flow rate")
+        
+        # Calibration validation
+        if calibration_data.cv_percent > 10:
+            warnings.append("WARNING: High calibration CV% - results may be unreliable")
+        if calibration_data.mean_peak_area <= 0:
+            warnings.append("ERROR: Invalid calibration peak area")
+        
+        return warnings
+    
+    def validate_surface_calculation_inputs(self, peak_area: float, calibration_data: CalibrationData,
+                                          flow_rate: float, surface_area: float) -> List[str]:
+        """Validate inputs for surface area normalization and return warnings/errors"""
+        warnings = []
+        
+        # Peak area validation
+        if peak_area <= 0:
+            warnings.append("ERROR: Peak area must be positive")
+        elif peak_area < 100:
+            warnings.append("WARNING: Very low peak area - check signal quality")
+        elif peak_area > 1000000:
+            warnings.append("WARNING: Very high peak area - check for overload")
+        
+        # Surface area validation
+        if surface_area <= 0:
+            warnings.append("ERROR: Surface area must be positive")
+        elif surface_area < 0.1:
+            warnings.append("WARNING: Very low surface area - check value")
+        elif surface_area > 100:
+            warnings.append("WARNING: Very high surface area - check value")
         
         # Flow rate validation
         if flow_rate <= 0:

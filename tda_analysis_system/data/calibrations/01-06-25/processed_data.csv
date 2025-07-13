@@ -1,0 +1,16 @@
+# Calibration Data Export
+# Calibration ID: 01-06-25
+# Date: 2025-07-08
+# Gas Concentration: 61.0 ppm
+# Mean Peak Area: 281485.5 µV*s
+# Standard Deviation: 2982.7 µV*s
+# CV%: 1.06%
+# Quality Score: 85.0/100
+#
+Run,Timestamp,Peak_Area_µVs,Peak_Height_µV,Outlier_Flag
+1,1748772062,275711.81250,49314.65625,
+2,1748772382,281361.62500,50335.14844,
+3,1748772706,282467.46875,50458.40625,
+4,1748773030,282694.43750,50632.52734,
+5,1748773354,282380.34375,50576.25391,
+6,1748773679,284297.15625,50738.21875,

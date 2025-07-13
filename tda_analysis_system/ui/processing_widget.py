@@ -150,38 +150,76 @@ class ProcessingWidget(QWidget):
         group = QGroupBox("Processing Parameters")
         layout = QGridLayout()
         
-        # Sample weight
-        layout.addWidget(QLabel("Sample Weight:"), 0, 0)
+        # Calculation Mode Selection
+        layout.addWidget(QLabel("Calculation Mode:"), 0, 0)
+        
+        calc_mode_layout = QHBoxLayout()
+        self.mass_normalized_radio = QRadioButton("Mass Normalized (ppm wt%)")
+        self.mass_normalized_radio.setChecked(True)
+        self.mass_normalized_radio.toggled.connect(self.on_calculation_mode_changed)
+        calc_mode_layout.addWidget(self.mass_normalized_radio)
+        
+        self.surface_normalized_radio = QRadioButton("Surface Area Normalized (mol/cm²)")
+        self.surface_normalized_radio.toggled.connect(self.on_calculation_mode_changed)
+        calc_mode_layout.addWidget(self.surface_normalized_radio)
+        
+        calc_mode_widget = QWidget()
+        calc_mode_widget.setLayout(calc_mode_layout)
+        layout.addWidget(calc_mode_widget, 0, 1, 1, 3)
+        
+        # Sample weight (for mass normalized mode)
+        self.sample_weight_label = QLabel("Sample Weight:")
+        layout.addWidget(self.sample_weight_label, 1, 0)
         self.sample_weight_edit = QLineEdit()
         self.sample_weight_edit.setPlaceholderText("e.g., 5.0")
         self.sample_weight_edit.textChanged.connect(self.validate_parameters)
-        layout.addWidget(self.sample_weight_edit, 0, 1)
-        layout.addWidget(QLabel("grams"), 0, 2)
+        layout.addWidget(self.sample_weight_edit, 1, 1)
+        self.sample_weight_unit_label = QLabel("grams")
+        layout.addWidget(self.sample_weight_unit_label, 1, 2)
         
         self.weight_status_label = QLabel("")
-        layout.addWidget(self.weight_status_label, 0, 3)
+        layout.addWidget(self.weight_status_label, 1, 3)
+        
+        # Surface area (for surface normalized mode)
+        self.surface_area_label = QLabel("Surface Area:")
+        layout.addWidget(self.surface_area_label, 2, 0)
+        self.surface_area_edit = QLineEdit()
+        self.surface_area_edit.setPlaceholderText("e.g., 2.5")
+        self.surface_area_edit.textChanged.connect(self.validate_parameters)
+        layout.addWidget(self.surface_area_edit, 2, 1)
+        self.surface_area_unit_label = QLabel("cm²")
+        layout.addWidget(self.surface_area_unit_label, 2, 2)
+        
+        self.surface_status_label = QLabel("")
+        layout.addWidget(self.surface_status_label, 2, 3)
+        
+        # Initially hide surface area controls
+        self.surface_area_label.setVisible(False)
+        self.surface_area_edit.setVisible(False)
+        self.surface_area_unit_label.setVisible(False)
+        self.surface_status_label.setVisible(False)
         
         # Flow rate
-        layout.addWidget(QLabel("Flow Rate:"), 1, 0)
+        layout.addWidget(QLabel("Flow Rate:"), 3, 0)
         self.flow_rate_edit = QLineEdit()
         self.flow_rate_edit.setPlaceholderText("e.g., 20.0")
         self.flow_rate_edit.textChanged.connect(self.validate_parameters)
-        layout.addWidget(self.flow_rate_edit, 1, 1)
-        layout.addWidget(QLabel("ml/min"), 1, 2)
+        layout.addWidget(self.flow_rate_edit, 3, 1)
+        layout.addWidget(QLabel("ml/min"), 3, 2)
         
         self.flow_status_label = QLabel("")
-        layout.addWidget(self.flow_status_label, 1, 3)
+        layout.addWidget(self.flow_status_label, 3, 3)
         
         # Cycle time
-        layout.addWidget(QLabel("Cycle Time:"), 2, 0)
+        layout.addWidget(QLabel("Cycle Time:"), 4, 0)
         self.cycle_time_edit = QLineEdit()
         self.cycle_time_edit.setPlaceholderText("e.g., 5.0")
         self.cycle_time_edit.textChanged.connect(self.validate_parameters)
-        layout.addWidget(self.cycle_time_edit, 2, 1)
-        layout.addWidget(QLabel("minutes"), 2, 2)
+        layout.addWidget(self.cycle_time_edit, 4, 1)
+        layout.addWidget(QLabel("minutes"), 4, 2)
         
         self.cycle_status_label = QLabel("")
-        layout.addWidget(self.cycle_status_label, 2, 3)
+        layout.addWidget(self.cycle_status_label, 4, 3)
         
         group.setLayout(layout)
         return group
@@ -329,23 +367,75 @@ class ProcessingWidget(QWidget):
         except Exception as e:
             handle_error_with_user_feedback(self, "Data Preview", e)
     
+    def on_calculation_mode_changed(self):
+        """Handle calculation mode change between mass and surface normalized"""
+        is_surface_mode = self.surface_normalized_radio.isChecked()
+        
+        # Show/hide appropriate controls
+        self.surface_area_label.setVisible(is_surface_mode)
+        self.surface_area_edit.setVisible(is_surface_mode)
+        self.surface_area_unit_label.setVisible(is_surface_mode)
+        self.surface_status_label.setVisible(is_surface_mode)
+        
+        # Sample weight is always visible but required only for mass mode
+        self.sample_weight_label.setText("Sample Weight:" if not is_surface_mode else "Sample Weight (reference):")
+        
+        # Re-validate parameters
+        self.validate_parameters()
+        self.update_process_button_state()
+    
     def validate_parameters(self):
         """Real-time validation of processing parameters"""
-        # Validate sample weight
+        is_surface_mode = self.surface_normalized_radio.isChecked()
+        
+        # Validate sample weight (required for mass mode, optional for surface mode)
         try:
             weight = float(self.sample_weight_edit.text()) if self.sample_weight_edit.text() else 0
-            if weight <= 0:
-                self.weight_status_label.setText("❌ Must be positive")
-                self.weight_status_label.setStyleSheet("color: red;")
-            elif weight < 0.1 or weight > 50:
-                self.weight_status_label.setText("⚠️ Unusual value")
-                self.weight_status_label.setStyleSheet("color: orange;")
-            else:
-                self.weight_status_label.setText("✅ Valid")
-                self.weight_status_label.setStyleSheet("color: green;")
+            if not is_surface_mode:  # Mass normalized mode
+                if weight <= 0:
+                    self.weight_status_label.setText("❌ Must be positive")
+                    self.weight_status_label.setStyleSheet("color: red;")
+                elif weight < 0.1 or weight > 50:
+                    self.weight_status_label.setText("⚠️ Unusual value")
+                    self.weight_status_label.setStyleSheet("color: orange;")
+                else:
+                    self.weight_status_label.setText("✅ Valid")
+                    self.weight_status_label.setStyleSheet("color: green;")
+            else:  # Surface normalized mode
+                if weight > 0:
+                    if weight < 0.1 or weight > 50:
+                        self.weight_status_label.setText("⚠️ Unusual value (ref)")
+                        self.weight_status_label.setStyleSheet("color: orange;")
+                    else:
+                        self.weight_status_label.setText("✅ Valid (ref)")
+                        self.weight_status_label.setStyleSheet("color: blue;")
+                else:
+                    self.weight_status_label.setText("ℹ️ Optional")
+                    self.weight_status_label.setStyleSheet("color: gray;")
         except ValueError:
-            self.weight_status_label.setText("❌ Invalid number")
-            self.weight_status_label.setStyleSheet("color: red;")
+            if not is_surface_mode:
+                self.weight_status_label.setText("❌ Invalid number")
+                self.weight_status_label.setStyleSheet("color: red;")
+            else:
+                self.weight_status_label.setText("⚠️ Invalid (ref)")
+                self.weight_status_label.setStyleSheet("color: orange;")
+        
+        # Validate surface area (required for surface mode)
+        if is_surface_mode:
+            try:
+                surface_area = float(self.surface_area_edit.text()) if self.surface_area_edit.text() else 0
+                if surface_area <= 0:
+                    self.surface_status_label.setText("❌ Must be positive")
+                    self.surface_status_label.setStyleSheet("color: red;")
+                elif surface_area < 0.1 or surface_area > 100:
+                    self.surface_status_label.setText("⚠️ Unusual value")
+                    self.surface_status_label.setStyleSheet("color: orange;")
+                else:
+                    self.surface_status_label.setText("✅ Valid")
+                    self.surface_status_label.setStyleSheet("color: green;")
+            except ValueError:
+                self.surface_status_label.setText("❌ Invalid number")
+                self.surface_status_label.setStyleSheet("color: red;")
         
         # Validate flow rate
         try:
@@ -469,11 +559,24 @@ class ProcessingWidget(QWidget):
     def parameters_valid(self) -> bool:
         """Check if all parameters are valid"""
         try:
-            weight = float(self.sample_weight_edit.text()) if self.sample_weight_edit.text() else 0
+            is_surface_mode = self.surface_normalized_radio.isChecked()
+            
+            # Flow rate and cycle time are always required
             flow = float(self.flow_rate_edit.text()) if self.flow_rate_edit.text() else 0
             cycle = float(self.cycle_time_edit.text()) if self.cycle_time_edit.text() else 0
             
-            return weight > 0 and flow > 0 and cycle > 0
+            if flow <= 0 or cycle <= 0:
+                return False
+            
+            if is_surface_mode:
+                # Surface normalized mode requires surface area
+                surface_area = float(self.surface_area_edit.text()) if self.surface_area_edit.text() else 0
+                return surface_area > 0
+            else:
+                # Mass normalized mode requires sample weight
+                weight = float(self.sample_weight_edit.text()) if self.sample_weight_edit.text() else 0
+                return weight > 0
+                
         except ValueError:
             return False
     
@@ -491,12 +594,25 @@ class ProcessingWidget(QWidget):
             return
         
         try:
-            # Collect parameters
+            is_surface_mode = self.surface_normalized_radio.isChecked()
+            
+            # Collect parameters based on calculation mode
             parameters = {
-                'sample_weight': float(self.sample_weight_edit.text()),
                 'flow_rate': float(self.flow_rate_edit.text()),
-                'cycle_time': float(self.cycle_time_edit.text())
+                'cycle_time': float(self.cycle_time_edit.text()),
+                'calculation_mode': 'surface_normalized' if is_surface_mode else 'mass_normalized'
             }
+            
+            if is_surface_mode:
+                parameters['surface_area'] = float(self.surface_area_edit.text())
+                # Include sample weight for reference if provided
+                if self.sample_weight_edit.text():
+                    parameters['sample_weight'] = float(self.sample_weight_edit.text())
+                else:
+                    parameters['sample_weight'] = 1.0  # Default for reference
+            else:
+                parameters['sample_weight'] = float(self.sample_weight_edit.text())
+                parameters['surface_area'] = 0.0  # Not used in mass mode
             
             # Show progress
             self.progress_bar.setVisible(True)
@@ -510,16 +626,29 @@ class ProcessingWidget(QWidget):
                 self.current_experiment, self.selected_calibration, parameters
             )
             
-            # Update results summary
+            # Update results summary based on calculation mode
             stats = self.processed_data.get_summary_statistics()
-            summary_text = f"""
-            <b>Processing Complete!</b><br>
-            <b>Total Hydrogen Released:</b> {stats['total_hydrogen_ppm']:.6f} ppm<br>
-            <b>Maximum Evolution Rate:</b> {stats['max_rate_ppm_per_min']:.8f} ppm/min<br>
-            <b>Average Evolution Rate:</b> {stats['avg_rate_ppm_per_min']:.8f} ppm/min<br>
-            <b>Experiment Duration:</b> {stats['duration_minutes']:.1f} minutes<br>
-            <b>Success Rate:</b> {stats['success_rate_percent']:.1f}%
-            """
+            
+            if is_surface_mode:
+                summary_text = f"""
+                <b>Processing Complete! (Surface Area Normalized)</b><br>
+                <b>Total Hydrogen Released:</b> {stats['total_hydrogen_mol_cm2']:.8e} mol/cm²<br>
+                <b>Maximum Evolution Rate:</b> {stats['max_rate_mol_cm2_per_min']:.8e} mol/cm²/min<br>
+                <b>Average Evolution Rate:</b> {stats['avg_rate_mol_cm2_per_min']:.8e} mol/cm²/min<br>
+                <b>Surface Area:</b> {stats['surface_area_cm2']:.2f} cm²<br>
+                <b>Experiment Duration:</b> {stats['duration_minutes']:.1f} minutes<br>
+                <b>Success Rate:</b> {stats['success_rate_percent']:.1f}%
+                """
+            else:
+                summary_text = f"""
+                <b>Processing Complete! (Mass Normalized)</b><br>
+                <b>Total Hydrogen Released:</b> {stats['total_hydrogen_ppm']:.6f} ppm<br>
+                <b>Maximum Evolution Rate:</b> {stats['max_rate_ppm_per_min']:.8f} ppm/min<br>
+                <b>Average Evolution Rate:</b> {stats['avg_rate_ppm_per_min']:.8f} ppm/min<br>
+                <b>Sample Weight:</b> {stats['sample_weight_g']:.2f} g<br>
+                <b>Experiment Duration:</b> {stats['duration_minutes']:.1f} minutes<br>
+                <b>Success Rate:</b> {stats['success_rate_percent']:.1f}%
+                """
             
             self.results_summary_label.setText(summary_text)
             
@@ -546,10 +675,16 @@ class ProcessingWidget(QWidget):
             QMessageBox.information(self, "Info", "No processed data to export")
             return
         
+        # Generate filename based on calculation mode
+        if self.processed_data.calculation_mode == "surface_normalized":
+            default_filename = f"{self.processed_data.experiment_name}_surface_normalized.csv"
+        else:
+            default_filename = f"{self.processed_data.experiment_name}_processed.csv"
+        
         filename, _ = QFileDialog.getSaveFileName(
             self, 
             "Export Enhanced CSV",
-            f"{self.processed_data.experiment_name}_processed.csv",
+            default_filename,
             "CSV files (*.csv)"
         )
         
@@ -723,13 +858,27 @@ class ProcessingWidget(QWidget):
             QMessageBox.warning(self, "Batch Processing", "Please select a calibration.")
             return
         
-        # Get parameters
+        # Get parameters based on calculation mode
         try:
+            is_surface_mode = self.surface_normalized_radio.isChecked()
+            
             parameters = {
-                'sample_weight': float(self.sample_weight_edit.text()),
                 'flow_rate': float(self.flow_rate_edit.text()),
-                'cycle_time': float(self.cycle_time_edit.text())
+                'cycle_time': float(self.cycle_time_edit.text()),
+                'calculation_mode': 'surface_normalized' if is_surface_mode else 'mass_normalized'
             }
+            
+            if is_surface_mode:
+                parameters['surface_area'] = float(self.surface_area_edit.text())
+                # Include sample weight for reference if provided
+                if self.sample_weight_edit.text():
+                    parameters['sample_weight'] = float(self.sample_weight_edit.text())
+                else:
+                    parameters['sample_weight'] = 1.0  # Default for reference
+            else:
+                parameters['sample_weight'] = float(self.sample_weight_edit.text())
+                parameters['surface_area'] = 0.0  # Not used in mass mode
+                
         except ValueError:
             QMessageBox.warning(self, "Batch Processing", "Please enter valid numeric parameters.")
             return

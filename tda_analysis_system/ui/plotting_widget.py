@@ -300,10 +300,20 @@ class PlottingWidget(QWidget):
         dpi_layout.addWidget(self.dpi_spin)
         layout.addLayout(dpi_layout)
         
+        # Action buttons layout
+        button_layout = QHBoxLayout()
+        
+        # Clear plot button
+        clear_btn = QPushButton("Clear Plot")
+        clear_btn.clicked.connect(self.clear_plot)
+        button_layout.addWidget(clear_btn)
+        
         # Export button
         export_btn = QPushButton("Export Plot")
         export_btn.clicked.connect(self.export_plot)
-        layout.addWidget(export_btn)
+        button_layout.addWidget(export_btn)
+        
+        layout.addLayout(button_layout)
         
         group.setLayout(layout)
         return group
@@ -478,6 +488,12 @@ class PlottingWidget(QWidget):
             
         except Exception as e:
             handle_error_with_user_feedback(self, "Plot Update", e)
+    
+    def clear_plot(self):
+        """Clear the current plot"""
+        self.figure.clear()
+        self.canvas.draw()
+        self.current_figure = None
     
     def export_plot(self):
         """Export the current plot"""

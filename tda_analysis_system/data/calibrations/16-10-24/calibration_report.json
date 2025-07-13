@@ -1,0 +1,46 @@
+{
+  "calibration_id": "16-10-24",
+  "date": "2025-07-08",
+  "processing_timestamp": "2025-07-08T01:58:29.480413",
+  "gas_concentration_ppm": 61.0,
+  "mean_peak_area": 293426.6125,
+  "std_deviation": 1216.150017676599,
+  "cv_percent": 0.41446479830679944,
+  "num_runs": 10,
+  "min_peak_area": 291596.375,
+  "max_peak_area": 295493.03125,
+  "median_peak_area": 293690.34375,
+  "raw_peak_areas": [
+    293203.8125,
+    293789.40625,
+    292455.90625,
+    291708.71875,
+    294305.6875,
+    293591.28125,
+    294138.34375,
+    293983.5625,
+    295493.03125,
+    291596.375
+  ],
+  "raw_timestamps": [
+    "1729097422",
+    "1729097741",
+    "1729098062",
+    "1729098382",
+    "1729098702",
+    "1729099018",
+    "1729099336",
+    "1729099656",
+    "1729099976",
+    "1729097102"
+  ],
+  "outlier_indices": [],
+  "quality_flags": [
+    "WARNING: Very high peak areas - check for overload"
+  ],
+  "quality_score": 100.0,
+  "is_valid": true,
+  "source_folder": "H:/TDA/data grab 07-07-25/calibrations/hydrogen cal gas- wb_16-10-24 2024-10-16 17-44-32",
+  "operator": "SYSTEM",
+  "notes": ""
+}

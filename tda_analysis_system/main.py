@@ -34,6 +34,7 @@ from modules.error_handling import handle_error_with_user_feedback
 from ui.calibration_widget import CalibrationWidget
 from ui.processing_widget import ProcessingWidget
 from ui.plotting_widget import PlottingWidget
+from ui.diffusion_widget import DiffusionWidget
 
 
 class TDAMainWindow(QMainWindow):
@@ -121,7 +122,7 @@ class TDAMainWindow(QMainWindow):
         self.center_window()
     
     def create_tabs(self):
-        """Create the three main application tabs"""
+        """Create the four main application tabs"""
         try:
             # Tab 1: Calibration Management
             self.calibration_widget = CalibrationWidget(self.calibration_manager)
@@ -134,6 +135,10 @@ class TDAMainWindow(QMainWindow):
             # Tab 3: Data Visualization
             self.plotting_widget = PlottingWidget(self.plot_manager)
             self.tab_widget.addTab(self.plotting_widget, "📈 Data Visualization")
+            
+            # Tab 4: Diffusion Analysis
+            self.diffusion_widget = DiffusionWidget(self.plot_manager)
+            self.tab_widget.addTab(self.diffusion_widget, "🔬 Diffusion Analysis")
             
             # Connect tab change signal for status updates
             self.tab_widget.currentChanged.connect(self.on_tab_changed)
@@ -239,7 +244,7 @@ class TDAMainWindow(QMainWindow):
     
     def on_tab_changed(self, index):
         """Handle tab change events"""
-        tab_names = ["Calibration Management", "Data Processing", "Data Visualization"]
+        tab_names = ["Calibration Management", "Data Processing", "Data Visualization", "Diffusion Analysis"]
         if 0 <= index < len(tab_names):
             self.status_bar.showMessage(f"Switched to {tab_names[index]}", 2000)
             
@@ -252,6 +257,11 @@ class TDAMainWindow(QMainWindow):
             elif index == 2:  # Visualization tab
                 try:
                     self.plotting_widget.scan_datasets()
+                except:
+                    pass
+            elif index == 3:  # Diffusion Analysis tab
+                try:
+                    self.diffusion_widget.scan_datasets()
                 except:
                     pass
     
@@ -326,6 +336,10 @@ class TDAMainWindow(QMainWindow):
             # Refresh visualization datasets
             if hasattr(self, 'plotting_widget'):
                 self.plotting_widget.scan_datasets()
+            
+            # Refresh diffusion analysis datasets
+            if hasattr(self, 'diffusion_widget'):
+                self.diffusion_widget.scan_datasets()
             
             # Update status counts
             self.update_status_counts()
